@@ -26,8 +26,7 @@ final class PadLink: ObservableObject {
     private var connection: NWConnection?
     private var timer: DispatchSourceTimer?
     private var seq: UInt16 = 0
-    private var pad: GCExtendedGamepad?
-    private var current: GCController?
+    private var pads: [GCExtendedGamepad] = []
     private var attached: [GCController] = []
     private var host = ""
     private let audio = AVAudioEngine()
@@ -44,39 +43,25 @@ final class PadLink: ObservableObject {
         GCController.controllers().forEach(attach)
     }
 
-    /// Listens to every connected controller; whichever you touch last becomes the active one.
+    /// Every connected controller feeds the same virtual pad; their inputs are merged.
     private func attach(_ c: GCController) {
         guard let gp = c.extendedGamepad else { return }
         if !attached.contains(where: { $0 === c }) { attached.append(c) }
-        gp.valueChangedHandler = { [weak self] g, _ in self?.activate(g.controller) }
-        if current == nil { activate(c) }
-        refreshName()
+        gp.valueChangedHandler = { [weak self] _, _ in self?.send() }
+        syncPads()
     }
 
     private func detach(_ c: GCController) {
         attached.removeAll { $0 === c }
         c.extendedGamepad?.valueChangedHandler = nil
-        if current === c {
-            current = nil
-            let next = attached.first
-            if let next { activate(next) } else { queue.async { self.pad = nil } }
-        }
-        refreshName()
+        syncPads()
     }
 
-    private func activate(_ c: GCController?) {
-        guard let c, let gp = c.extendedGamepad else { return }
-        if current !== c {
-            current = c
-            queue.async { self.pad = gp }
-            refreshName()
-        }
-        send()
-    }
-
-    private func refreshName() {
+    private func syncPads() {
+        let gps = attached.compactMap { $0.extendedGamepad }
+        queue.async { self.pads = gps }
         let n = attached.count
-        controllerName = current.map { ($0.vendorName ?? "Controller") + (n > 1 ? " (+\(n - 1) more)" : "") }
+        controllerName = n == 0 ? nil : (attached[0].vendorName ?? "Controller") + (n > 1 ? " (+\(n - 1) more)" : "")
     }
 
     /// A silent audio session keeps the app running when you switch apps or lock the phone.
@@ -139,27 +124,37 @@ final class PadLink: ObservableObject {
 
     private func send() {
         queue.async { [self] in
-            guard let conn = connection, let pad else { return }
-            let data = Self.encode(pad, seq: seq, swapAB: layout.0, swapXY: layout.1)
+            guard let conn = connection, !pads.isEmpty else { return }
+            let data = Self.encode(pads, seq: seq, swapAB: layout.0, swapXY: layout.1)
             seq &+= 1
             conn.send(content: data, completion: .idempotent)
             DispatchQueue.main.async { self.packetsSent += 1 }
         }
     }
 
-    static func encode(_ p: GCExtendedGamepad, seq: UInt16, swapAB: Bool, swapXY: Bool) -> Data {
+    static func encode(_ pads: [GCExtendedGamepad], seq: UInt16, swapAB: Bool, swapXY: Bool) -> Data {
         var b: UInt16 = 0
         func set(_ on: Bool, _ mask: UInt16) { if on { b |= mask } }
-        set(p.dpad.up.isPressed, 0x1); set(p.dpad.down.isPressed, 0x2)
-        set(p.dpad.left.isPressed, 0x4); set(p.dpad.right.isPressed, 0x8)
-        set(p.buttonMenu.isPressed, 0x10)
-        set(p.buttonOptions?.isPressed ?? false, 0x20)
-        set(p.leftThumbstickButton?.isPressed ?? false, 0x40)
-        set(p.rightThumbstickButton?.isPressed ?? false, 0x80)
-        set(p.leftShoulder.isPressed, 0x100); set(p.rightShoulder.isPressed, 0x200)
-        set(p.buttonHome?.isPressed ?? false, 0x400)
-        set(p.buttonA.isPressed, swapAB ? 0x2000 : 0x1000); set(p.buttonB.isPressed, swapAB ? 0x1000 : 0x2000)
-        set(p.buttonX.isPressed, swapXY ? 0x8000 : 0x4000); set(p.buttonY.isPressed, swapXY ? 0x4000 : 0x8000)
+        var lt: Float = 0, rt: Float = 0
+        var ls: (Float, Float) = (0, 0), rs: (Float, Float) = (0, 0)
+        func larger(_ a: (Float, Float), _ x: Float, _ y: Float) -> (Float, Float) {
+            x * x + y * y > a.0 * a.0 + a.1 * a.1 ? (x, y) : a
+        }
+        for p in pads {
+            set(p.dpad.up.isPressed, 0x1); set(p.dpad.down.isPressed, 0x2)
+            set(p.dpad.left.isPressed, 0x4); set(p.dpad.right.isPressed, 0x8)
+            set(p.buttonMenu.isPressed, 0x10)
+            set(p.buttonOptions?.isPressed ?? false, 0x20)
+            set(p.leftThumbstickButton?.isPressed ?? false, 0x40)
+            set(p.rightThumbstickButton?.isPressed ?? false, 0x80)
+            set(p.leftShoulder.isPressed, 0x100); set(p.rightShoulder.isPressed, 0x200)
+            set(p.buttonHome?.isPressed ?? false, 0x400)
+            set(p.buttonA.isPressed, swapAB ? 0x2000 : 0x1000); set(p.buttonB.isPressed, swapAB ? 0x1000 : 0x2000)
+            set(p.buttonX.isPressed, swapXY ? 0x8000 : 0x4000); set(p.buttonY.isPressed, swapXY ? 0x4000 : 0x8000)
+            lt = max(lt, p.leftTrigger.value); rt = max(rt, p.rightTrigger.value)
+            ls = larger(ls, p.leftThumbstick.xAxis.value, p.leftThumbstick.yAxis.value)
+            rs = larger(rs, p.rightThumbstick.xAxis.value, p.rightThumbstick.yAxis.value)
+        }
 
         func axis(_ v: Float) -> Int16 { Int16(max(-1, min(1, v)) * 32767) }
         func trig(_ v: Float) -> UInt8 { UInt8(max(0, min(1, v)) * 255) }
@@ -167,9 +162,9 @@ final class PadLink: ObservableObject {
         var d = Data(capacity: 16)
         func put<T: FixedWidthInteger>(_ v: T) { withUnsafeBytes(of: v.littleEndian) { d.append(contentsOf: $0) } }
         put(UInt16(0x504C)); put(seq); put(b)
-        put(trig(p.leftTrigger.value)); put(trig(p.rightTrigger.value))
-        put(axis(p.leftThumbstick.xAxis.value)); put(axis(p.leftThumbstick.yAxis.value))
-        put(axis(p.rightThumbstick.xAxis.value)); put(axis(p.rightThumbstick.yAxis.value))
+        put(trig(lt)); put(trig(rt))
+        put(axis(ls.0)); put(axis(ls.1))
+        put(axis(rs.0)); put(axis(rs.1))
         return d
     }
 }
