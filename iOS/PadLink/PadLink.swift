@@ -13,7 +13,8 @@ final class PadLink: ObservableObject {
     @Published var running = false
     @Published var packetsSent = 0
 
-    // Latency (round trip to the PC receiver), updated ~5x per second.
+    // Latency (round trip to the PC receiver), measured ~5x per second while testing.
+    @Published var testing = false
     @Published var rtt: Double?               // latest, milliseconds
     @Published var history: [Double] = []     // recent samples, -1 = lost
     private var pingSeq: UInt16 = 0
@@ -107,12 +108,25 @@ final class PadLink: ObservableObject {
         t.setEventHandler { [weak self] in self?.send() }
         t.resume()
         timer = t
+    }
 
+    /// Latency test runs only on demand so normal use sends nothing extra.
+    func startTest() {
+        guard running, pingTimer == nil else { return }
+        lastReply = DispatchTime.now().uptimeNanoseconds
+        history = []; rtt = nil
+        testing = true
         let p = DispatchSource.makeTimerSource(queue: queue)
         p.schedule(deadline: .now(), repeating: 0.2)
         p.setEventHandler { [weak self] in self?.ping() }
         p.resume()
         pingTimer = p
+    }
+
+    func stopTest() {
+        pingTimer?.cancel(); pingTimer = nil
+        testing = false
+        rtt = nil; history = []
     }
 
     private func ping() {
@@ -170,10 +184,9 @@ final class PadLink: ObservableObject {
 
     func stop() {
         timer?.cancel(); timer = nil
-        pingTimer?.cancel(); pingTimer = nil
         connection?.cancel(); connection = nil
+        stopTest()
         running = false
-        rtt = nil; history = []
         stopKeepAlive()
     }
 
