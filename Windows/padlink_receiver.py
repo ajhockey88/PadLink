@@ -32,15 +32,31 @@ def log(msg):
         pass
 
 
+_pad = None
+
+
+def get_pad():
+    """Create the virtual pad once. Windows plays the device-connect chime on every creation."""
+    global _pad
+    if _pad is None:
+        _pad = vg.VX360Gamepad()
+    return _pad
+
+
 def main():
-    pad = vg.VX360Gamepad()
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     if sys.platform == "win32":
         # Windows raises ConnectionResetError on recv after a send hit a closed port
         # (the phone app was closed). Turn that off so the receiver keeps running.
         SIO_UDP_CONNRESET = 0x9800000C
         sock.ioctl(SIO_UDP_CONNRESET, False)
-    sock.bind(("0.0.0.0", PORT))
+    try:
+        sock.bind(("0.0.0.0", PORT))
+    except OSError:
+        # Another copy already owns the port; exit before creating a second pad (no chime).
+        log("Already running, exiting.")
+        raise SystemExit(0)
+    pad = get_pad()
     sock.settimeout(0.25)
     print(f"PadLink listening on UDP {PORT}")
     last = None
