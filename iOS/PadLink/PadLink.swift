@@ -13,6 +13,14 @@ final class PadLink: ObservableObject {
     @Published var running = false
     @Published var packetsSent = 0
 
+    // Latency (round trip to the PC receiver), updated ~5x per second.
+    @Published var rtt: Double?               // latest, milliseconds
+    @Published var history: [Double] = []     // recent samples, -1 = lost
+    private var pingSeq: UInt16 = 0
+    private var pingTimer: DispatchSourceTimer?
+    private var lastReply = DispatchTime.now().uptimeNanoseconds
+    static let historyLength = 120
+
     // Swap face buttons (e.g. Nintendo-style layout). Read on the network queue, written from the UI.
     @Published var swapAB = UserDefaults.standard.bool(forKey: "swapAB") {
         didSet { UserDefaults.standard.set(swapAB, forKey: "swapAB"); layout = (swapAB, swapXY) }
@@ -99,6 +107,50 @@ final class PadLink: ObservableObject {
         t.setEventHandler { [weak self] in self?.send() }
         t.resume()
         timer = t
+
+        let p = DispatchSource.makeTimerSource(queue: queue)
+        p.schedule(deadline: .now(), repeating: 0.2)
+        p.setEventHandler { [weak self] in self?.ping() }
+        p.resume()
+        pingTimer = p
+    }
+
+    private func ping() {
+        guard let conn = connection else { return }
+        let now = DispatchTime.now().uptimeNanoseconds
+        // Anything unanswered for a full second counts as a lost sample.
+        if now - lastReply > 1_000_000_000 {
+            lastReply = now
+            publish(-1)
+        }
+        var d = Data(capacity: 12)
+        func put<T: FixedWidthInteger>(_ v: T) { withUnsafeBytes(of: v.littleEndian) { d.append(contentsOf: $0) } }
+        put(UInt16(0x5049)); put(pingSeq); put(now)
+        pingSeq &+= 1
+        conn.send(content: d, completion: .idempotent)
+    }
+
+    private func receive(_ conn: NWConnection) {
+        conn.receiveMessage { [weak self, weak conn] data, _, _, error in
+            guard let self, let conn, self.connection === conn else { return }
+            if let data, data.count == 12 {
+                let sent = data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 4, as: UInt64.self) }
+                let now = DispatchTime.now().uptimeNanoseconds
+                if now >= UInt64(littleEndian: sent) {
+                    self.lastReply = now
+                    self.publish(Double(now - UInt64(littleEndian: sent)) / 1_000_000)
+                }
+            }
+            if error == nil { self.receive(conn) }
+        }
+    }
+
+    private func publish(_ ms: Double) {
+        DispatchQueue.main.async {
+            self.rtt = ms >= 0 ? ms : nil
+            self.history.append(ms)
+            if self.history.count > Self.historyLength { self.history.removeFirst() }
+        }
     }
 
     private func connect() {
@@ -113,12 +165,15 @@ final class PadLink: ObservableObject {
         conn.start(queue: queue)
         connection?.cancel()
         connection = conn
+        receive(conn)
     }
 
     func stop() {
         timer?.cancel(); timer = nil
+        pingTimer?.cancel(); pingTimer = nil
         connection?.cancel(); connection = nil
         running = false
+        rtt = nil; history = []
         stopKeepAlive()
     }
 

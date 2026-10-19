@@ -17,6 +17,7 @@ struct ContentView: View {
                 link.running ? link.stop() : link.start(host: host)
             }
             .buttonStyle(.borderedProminent)
+            if link.running { LatencyView(rtt: link.rtt, history: link.history) }
             Text("\(link.packetsSent) packets sent")
                 .font(.footnote).foregroundStyle(.secondary)
         }

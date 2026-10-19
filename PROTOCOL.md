@@ -14,3 +14,12 @@
 
 Buttons: DPAD_UP 0x1, DOWN 0x2, LEFT 0x4, RIGHT 0x8, START 0x10, BACK 0x20,
 L3 0x40, R3 0x80, LB 0x100, RB 0x200, GUIDE 0x400, A 0x1000, B 0x2000, X 0x4000, Y 0x8000.
+
+## Ping (latency test, 12 bytes)
+| off | type | field                              |
+|-----|------|------------------------------------|
+| 0   | u16  | magic `0x5049` ("PI")              |
+| 2   | u16  | sequence                           |
+| 4   | u64  | sender timestamp (opaque to PC)    |
+
+The receiver echoes the 12 bytes back unchanged; the app measures round-trip time.
