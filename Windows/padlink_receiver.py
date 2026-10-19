@@ -44,6 +44,7 @@ def get_pad():
 
 
 def main():
+    print("PadLink receiver starting...")
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     if sys.platform == "win32":
         # Windows raises ConnectionResetError on recv after a send hit a closed port
@@ -111,5 +112,8 @@ if __name__ == "__main__":
         try:
             main()
         except Exception:
-            log(traceback.format_exc())
-            time.sleep(1)
+            err = traceback.format_exc()
+            log(err)
+            print(err)
+            print("PadLink hit an error (see above). Is the ViGEmBus driver installed? Retrying in 3s...")
+            time.sleep(3)
