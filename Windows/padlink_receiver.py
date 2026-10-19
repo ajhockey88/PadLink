@@ -2,9 +2,12 @@
 
 Requires ViGEmBus (https://github.com/nefarius/ViGEmBus) and `pip install vgamepad`.
 """
+import os
 import socket
 import struct
+import sys
 import time
+import traceback
 
 import vgamepad as vg
 
@@ -20,9 +23,23 @@ def newer(seq, last):
     return last is None or 0 < ((seq - last) & 0xFFFF) < 0x8000
 
 
+def log(msg):
+    """Append to padlink.log next to the script (there is no console when run hidden)."""
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "padlink.log"), "a") as f:
+            f.write(time.strftime("%Y-%m-%d %H:%M:%S ") + msg + "\n")
+    except OSError:
+        pass
+
+
 def main():
     pad = vg.VX360Gamepad()
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    if sys.platform == "win32":
+        # Windows raises ConnectionResetError on recv after a send hit a closed port
+        # (the phone app was closed). Turn that off so the receiver keeps running.
+        SIO_UDP_CONNRESET = 0x9800000C
+        sock.ioctl(SIO_UDP_CONNRESET, False)
     sock.bind(("0.0.0.0", PORT))
     sock.settimeout(0.25)
     print(f"PadLink listening on UDP {PORT}")
@@ -38,7 +55,10 @@ def main():
             data = None
 
         if data and len(data) == PING_SIZE and struct.unpack_from("<H", data)[0] == PING_MAGIC:
-            sock.sendto(data, addr)
+            try:
+                sock.sendto(data, addr)
+            except OSError:
+                pass
         elif data and len(data) == PACKET.size:
             magic, seq, buttons, lt, rt, lx, ly, rx, ry = PACKET.unpack(data)
             if magic == MAGIC and newer(seq, last):
@@ -63,4 +83,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # Never exit: if anything unexpected happens, log it and start over.
+    while True:
+        try:
+            main()
+        except Exception:
+            log(traceback.format_exc())
+            time.sleep(1)
