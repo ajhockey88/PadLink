@@ -55,10 +55,13 @@ def main():
     except OSError:
         # Another copy already owns the port; exit before creating a second pad (no chime).
         log("Already running, exiting.")
+        print(f"PadLink is already running in the background (UDP {PORT} is in use).")
+        print("To restart it: Stop-ScheduledTask PadLinkReceiver, then run this again.")
         raise SystemExit(0)
     pad = get_pad()
     sock.settimeout(0.25)
-    print(f"PadLink listening on UDP {PORT}")
+    print(f"PadLink listening on UDP {PORT} (virtual Xbox 360 pad created)")
+    print("Waiting for the phone...")
     last = None
     last_input = time.monotonic()
     idle = False
@@ -78,6 +81,8 @@ def main():
         elif data and len(data) == PACKET.size:
             magic, seq, buttons, lt, rt, lx, ly, rx, ry = PACKET.unpack(data)
             if magic == MAGIC and newer(seq, last):
+                if idle or last is None:
+                    print(f"Phone connected: {addr[0]}")
                 last = seq
                 last_input = time.monotonic()
                 idle = False
@@ -94,6 +99,8 @@ def main():
         if not idle and time.monotonic() - last_input > IDLE_AFTER:
             pad.reset()
             pad.update()
+            if last is not None:
+                print("Phone went quiet; controller released.")
             idle = True
             last = None
 
