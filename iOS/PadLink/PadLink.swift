@@ -28,6 +28,7 @@ final class PadLink: ObservableObject {
     private var seq: UInt16 = 0
     private var pad: GCExtendedGamepad?
     private var current: GCController?
+    private var attached: [GCController] = []
     private var host = ""
     private let audio = AVAudioEngine()
 
@@ -35,26 +36,47 @@ final class PadLink: ObservableObject {
         // Keep delivering controller input when the app is not frontmost.
         GCController.shouldMonitorBackgroundEvents = true
         NotificationCenter.default.addObserver(forName: .GCControllerDidConnect, object: nil, queue: .main) { [weak self] n in
-            self?.attach(n.object as? GCController)
+            if let c = n.object as? GCController { self?.attach(c) }
         }
         NotificationCenter.default.addObserver(forName: .GCControllerDidDisconnect, object: nil, queue: .main) { [weak self] n in
-            guard let self, (n.object as? GCController) === self.current else { return }
-            // controllers() can still list the one that just left; exclude it explicitly.
-            self.attach(GCController.controllers().first { $0 !== self.current && $0.extendedGamepad != nil })
+            if let c = n.object as? GCController { self?.detach(c) }
         }
-        attach(GCController.controllers().first { $0.extendedGamepad != nil })
+        GCController.controllers().forEach(attach)
     }
 
-    private func attach(_ c: GCController?) {
-        guard let c, c.extendedGamepad != nil else {
-            if c == nil { current = nil; pad = nil; controllerName = nil }
-            return
+    /// Listens to every connected controller; whichever you touch last becomes the active one.
+    private func attach(_ c: GCController) {
+        guard let gp = c.extendedGamepad else { return }
+        if !attached.contains(where: { $0 === c }) { attached.append(c) }
+        gp.valueChangedHandler = { [weak self] g, _ in self?.activate(g.controller) }
+        if current == nil { activate(c) }
+        refreshName()
+    }
+
+    private func detach(_ c: GCController) {
+        attached.removeAll { $0 === c }
+        c.extendedGamepad?.valueChangedHandler = nil
+        if current === c {
+            current = nil
+            let next = attached.first
+            if let next { activate(next) } else { queue.async { self.pad = nil } }
         }
-        current = c
-        let gp = c.extendedGamepad
-        queue.async { self.pad = gp }
-        controllerName = c.vendorName ?? "Controller"
-        gp?.valueChangedHandler = { [weak self] _, _ in self?.send() }
+        refreshName()
+    }
+
+    private func activate(_ c: GCController?) {
+        guard let c, let gp = c.extendedGamepad else { return }
+        if current !== c {
+            current = c
+            queue.async { self.pad = gp }
+            refreshName()
+        }
+        send()
+    }
+
+    private func refreshName() {
+        let n = attached.count
+        controllerName = current.map { ($0.vendorName ?? "Controller") + (n > 1 ? " (+\(n - 1) more)" : "") }
     }
 
     /// A silent audio session keeps the app running when you switch apps or lock the phone.

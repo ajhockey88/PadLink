@@ -21,5 +21,9 @@ struct ContentView: View {
                 .font(.footnote).foregroundStyle(.secondary)
         }
         .padding()
+        .onAppear {
+            // Start automatically with the saved PC address every time the app opens.
+            if !host.isEmpty && !link.running { link.start(host: host) }
+        }
     }
 }
