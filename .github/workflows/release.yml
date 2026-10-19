@@ -33,28 +33,22 @@ jobs:
       - uses: actions/upload-artifact@v4
         with: { name: ipa, path: iOS/PadLink.ipa }
 
-  windows:
-    runs-on: windows-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.12" }
-      - run: "pip install --only-binary=:all: vgamepad pyinstaller"
-      - run: pyinstaller --onefile --name PadLinkReceiver --collect-all vgamepad Windows/padlink_receiver.py
-      - uses: actions/upload-artifact@v4
-        with: { name: receiver, path: dist/PadLinkReceiver.exe }
-
   release:
-    needs: [ios, windows]
+    needs: [ios]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with: { path: out, merge-multiple: true }
+      - name: Package Windows receiver
+        run: |
+          cp Windows/padlink_receiver.py out/
+          echo vgamepad > out/requirements.txt
+          cd out && zip PadLinkReceiver.zip padlink_receiver.py requirements.txt
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v0.1.0' }}
           files: |
             out/PadLink.ipa
-            out/PadLinkReceiver.exe
+            out/PadLinkReceiver.zip
           generate_release_notes: true
