@@ -49,8 +49,16 @@ def main():
     if sys.platform == "win32":
         # Windows raises ConnectionResetError on recv after a send hit a closed port
         # (the phone app was closed). Turn that off so the receiver keeps running.
-        SIO_UDP_CONNRESET = 0x9800000C
-        sock.ioctl(SIO_UDP_CONNRESET, False)
+        # (socket.ioctl() does not support this code, so call WSAIoctl directly.)
+        try:
+            import ctypes
+            SIO_UDP_CONNRESET = 0x9800000C
+            ctypes.windll.Ws2_32.WSAIoctl(
+                sock.fileno(), SIO_UDP_CONNRESET,
+                ctypes.byref(ctypes.c_ulong(0)), 4, None, 0,
+                ctypes.byref(ctypes.c_ulong(0)), None, None)
+        except Exception:
+            pass  # only a nicety; recv errors are handled below anyway
     try:
         sock.bind(("0.0.0.0", PORT))
     except OSError:
