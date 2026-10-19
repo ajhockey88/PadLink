@@ -45,13 +45,13 @@ jobs:
 
   release:
     needs: [ios, windows]
-    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with: { path: out, merge-multiple: true }
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v0.1.0' }}
           files: |
             out/PadLink.ipa
             out/PadLinkReceiver.exe
