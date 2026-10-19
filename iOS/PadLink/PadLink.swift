@@ -1,6 +1,8 @@
 import Foundation
 import GameController
 import Network
+import AVFoundation
+import UIKit
 
 /// Reads a wired controller via GameController and streams its state over UDP.
 final class PadLink: ObservableObject {
@@ -25,32 +27,65 @@ final class PadLink: ObservableObject {
     private var timer: DispatchSourceTimer?
     private var seq: UInt16 = 0
     private var pad: GCExtendedGamepad?
+    private var current: GCController?
+    private var host = ""
+    private let audio = AVAudioEngine()
 
     init() {
-        NotificationCenter.default.addObserver(forName: .GCControllerDidConnect, object: nil, queue: .main) { [weak self] _ in
-            self?.attachFirstController()
+        // Keep delivering controller input when the app is not frontmost.
+        GCController.shouldMonitorBackgroundEvents = true
+        NotificationCenter.default.addObserver(forName: .GCControllerDidConnect, object: nil, queue: .main) { [weak self] n in
+            self?.attach(n.object as? GCController)
         }
-        NotificationCenter.default.addObserver(forName: .GCControllerDidDisconnect, object: nil, queue: .main) { [weak self] _ in
-            self?.attachFirstController()
+        NotificationCenter.default.addObserver(forName: .GCControllerDidDisconnect, object: nil, queue: .main) { [weak self] n in
+            guard let self, (n.object as? GCController) === self.current else { return }
+            // controllers() can still list the one that just left; exclude it explicitly.
+            self.attach(GCController.controllers().first { $0 !== self.current && $0.extendedGamepad != nil })
         }
-        attachFirstController()
+        attach(GCController.controllers().first { $0.extendedGamepad != nil })
     }
 
-    private func attachFirstController() {
-        let c = GCController.controllers().first { $0.extendedGamepad != nil }
-        pad = c?.extendedGamepad
-        controllerName = c?.vendorName ?? c.map { _ in "Controller" }
-        pad?.valueChangedHandler = { [weak self] _, _ in self?.send() }
+    private func attach(_ c: GCController?) {
+        guard let c, c.extendedGamepad != nil else {
+            if c == nil { current = nil; pad = nil; controllerName = nil }
+            return
+        }
+        current = c
+        let gp = c.extendedGamepad
+        queue.async { self.pad = gp }
+        controllerName = c.vendorName ?? "Controller"
+        gp?.valueChangedHandler = { [weak self] _, _ in self?.send() }
+    }
+
+    /// A silent audio session keeps the app running when you switch apps or lock the phone.
+    private func startKeepAlive() {
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, options: [.mixWithOthers])
+            try AVAudioSession.sharedInstance().setActive(true)
+            let format = audio.outputNode.inputFormat(forBus: 0)
+            let silence = AVAudioSourceNode { _, _, _, buffers in
+                for b in UnsafeMutableAudioBufferListPointer(buffers) { memset(b.mData, 0, Int(b.mDataByteSize)) }
+                return noErr
+            }
+            audio.attach(silence)
+            audio.connect(silence, to: audio.mainMixerNode, format: format)
+            try audio.start()
+        } catch {}
+        DispatchQueue.main.async { UIApplication.shared.isIdleTimerDisabled = true }
+    }
+
+    private func stopKeepAlive() {
+        audio.stop()
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        DispatchQueue.main.async { UIApplication.shared.isIdleTimerDisabled = false }
     }
 
     func start(host: String) {
         guard !host.isEmpty else { return }
-        let params = NWParameters.udp
-        params.serviceClass = .interactiveVoice
-        let conn = NWConnection(host: NWEndpoint.Host(host), port: Self.port, using: params)
-        conn.start(queue: queue)
-        connection = conn
+        self.host = host
+        connect()
         running = true
+        startKeepAlive()
 
         let t = DispatchSource.makeTimerSource(queue: queue)
         t.schedule(deadline: .now(), repeating: Self.heartbeat)
@@ -59,10 +94,25 @@ final class PadLink: ObservableObject {
         timer = t
     }
 
+    private func connect() {
+        let params = NWParameters.udp
+        params.serviceClass = .interactiveVoice
+        let conn = NWConnection(host: NWEndpoint.Host(host), port: Self.port, using: params)
+        conn.stateUpdateHandler = { [weak self, weak conn] state in
+            // Network changes (Wi-Fi roam, app resume) can fail the socket; rebuild it.
+            guard let self, let conn, self.connection === conn else { return }
+            if case .failed = state { conn.cancel(); self.connect() }
+        }
+        conn.start(queue: queue)
+        connection?.cancel()
+        connection = conn
+    }
+
     func stop() {
         timer?.cancel(); timer = nil
         connection?.cancel(); connection = nil
         running = false
+        stopKeepAlive()
     }
 
     private func send() {
