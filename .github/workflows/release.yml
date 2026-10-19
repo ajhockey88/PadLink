@@ -11,6 +11,7 @@ permissions:
 jobs:
   ios:
     runs-on: macos-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - run: brew install xcodegen
@@ -34,11 +35,12 @@ jobs:
 
   windows:
     runs-on: windows-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: pip install vgamepad pyinstaller
+      - run: pip install --only-binary=:all: vgamepad pyinstaller
       - run: pyinstaller --onefile --name PadLinkReceiver --collect-all vgamepad Windows/padlink_receiver.py
       - uses: actions/upload-artifact@v4
         with: { name: receiver, path: dist/PadLinkReceiver.exe }
