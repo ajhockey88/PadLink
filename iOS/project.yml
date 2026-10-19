@@ -1,0 +1,16 @@
+name: PadLink
+options:
+  bundleIdPrefix: com.example
+targets:
+  PadLink:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources: [PadLink]
+    settings:
+      GENERATE_INFOPLIST_FILE: YES
+      INFOPLIST_KEY_NSLocalNetworkUsageDescription: "Send controller input to your PC."
+      INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+      INFOPLIST_KEY_UILaunchScreen_Generation: YES
+      INFOPLIST_KEY_UIRequiredDeviceCapabilities: ""
+      PRODUCT_BUNDLE_IDENTIFIER: com.example.padlink
