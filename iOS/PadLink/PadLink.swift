@@ -11,6 +11,15 @@ final class PadLink: ObservableObject {
     @Published var running = false
     @Published var packetsSent = 0
 
+    // Swap face buttons (e.g. Nintendo-style layout). Read on the network queue, written from the UI.
+    @Published var swapAB = UserDefaults.standard.bool(forKey: "swapAB") {
+        didSet { UserDefaults.standard.set(swapAB, forKey: "swapAB"); layout = (swapAB, swapXY) }
+    }
+    @Published var swapXY = UserDefaults.standard.bool(forKey: "swapXY") {
+        didSet { UserDefaults.standard.set(swapXY, forKey: "swapXY"); layout = (swapAB, swapXY) }
+    }
+    private var layout = (UserDefaults.standard.bool(forKey: "swapAB"), UserDefaults.standard.bool(forKey: "swapXY"))
+
     private let queue = DispatchQueue(label: "padlink.net", qos: .userInteractive)
     private var connection: NWConnection?
     private var timer: DispatchSourceTimer?
@@ -59,14 +68,14 @@ final class PadLink: ObservableObject {
     private func send() {
         queue.async { [self] in
             guard let conn = connection, let pad else { return }
-            let data = Self.encode(pad, seq: seq)
+            let data = Self.encode(pad, seq: seq, swapAB: layout.0, swapXY: layout.1)
             seq &+= 1
             conn.send(content: data, completion: .idempotent)
             DispatchQueue.main.async { self.packetsSent += 1 }
         }
     }
 
-    static func encode(_ p: GCExtendedGamepad, seq: UInt16) -> Data {
+    static func encode(_ p: GCExtendedGamepad, seq: UInt16, swapAB: Bool, swapXY: Bool) -> Data {
         var b: UInt16 = 0
         func set(_ on: Bool, _ mask: UInt16) { if on { b |= mask } }
         set(p.dpad.up.isPressed, 0x1); set(p.dpad.down.isPressed, 0x2)
@@ -77,8 +86,8 @@ final class PadLink: ObservableObject {
         set(p.rightThumbstickButton?.isPressed ?? false, 0x80)
         set(p.leftShoulder.isPressed, 0x100); set(p.rightShoulder.isPressed, 0x200)
         set(p.buttonHome?.isPressed ?? false, 0x400)
-        set(p.buttonA.isPressed, 0x1000); set(p.buttonB.isPressed, 0x2000)
-        set(p.buttonX.isPressed, 0x4000); set(p.buttonY.isPressed, 0x8000)
+        set(p.buttonA.isPressed, swapAB ? 0x2000 : 0x1000); set(p.buttonB.isPressed, swapAB ? 0x1000 : 0x2000)
+        set(p.buttonX.isPressed, swapXY ? 0x8000 : 0x4000); set(p.buttonY.isPressed, swapXY ? 0x4000 : 0x8000)
 
         func axis(_ v: Float) -> Int16 { Int16(max(-1, min(1, v)) * 32767) }
         func trig(_ v: Float) -> UInt8 { UInt8(max(0, min(1, v)) * 255) }

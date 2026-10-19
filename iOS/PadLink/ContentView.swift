@@ -11,6 +11,8 @@ struct ContentView: View {
                 .textFieldStyle(.roundedBorder)
                 .keyboardType(.decimalPad)
                 .autocorrectionDisabled()
+            Toggle("Swap A and B", isOn: $link.swapAB)
+            Toggle("Swap X and Y", isOn: $link.swapXY)
             Button(link.running ? "Stop" : "Start") {
                 link.running ? link.stop() : link.start(host: host)
             }
