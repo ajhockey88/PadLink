@@ -21,9 +21,23 @@ def main():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind(("0.0.0.0", PORT))
     print(f"PadLink listening on UDP {PORT}")
+    sock.settimeout(1.0)
     last = None
+    idle = False
     while True:
-        data, _ = sock.recvfrom(64)
+        try:
+            data, _ = sock.recvfrom(64)
+        except socket.timeout:
+            # Phone went quiet (app closed, cable pulled): release everything.
+            if not idle:
+                pad.reset()
+                pad.update()
+                idle = True
+                last = None
+            continue
+        except OSError:
+            continue
+        idle = False
         if len(data) != PACKET.size:
             continue
         magic, seq, buttons, lt, rt, lx, ly, rx, ry = PACKET.unpack(data)
