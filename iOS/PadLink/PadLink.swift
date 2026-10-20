@@ -105,8 +105,8 @@ final class PadLink: ObservableObject {
     // Latency test (round trip to the PC receiver), measured ~5x per second while testing.
     @Published var testing = false
     @Published var benchmark: BenchmarkState = .idle
-    @Published var lastBenchmark: BenchmarkResult? = PadLink.loadBenchmark()
-    @Published var previousBenchmark: BenchmarkResult?
+    @Published var savedControllers: [SavedController] = PadLink.loadSaved()
+    @Published var previousRun: BenchmarkRun?  // last run on the same controller, for comparison
     @Published var rtt: Double?               // latest, milliseconds
     @Published var history: [Double] = []     // recent samples, -1 = lost
 
@@ -205,6 +205,8 @@ final class PadLink: ObservableObject {
     private var testingQ = false
     private var benchTimer: DispatchSourceTimer?
     private var benchRunning = false
+    private var benchCapturing = false                // main thread: recording controller events
+    private var benchEvents: [(UInt64, String)] = []   // main thread: (uptime ns, controller name)
     private var benchTicks = 0
     private var benchSent = 0
     private var benchSeqs = Set<UInt16>()
@@ -242,6 +244,7 @@ final class PadLink: ObservableObject {
         if !attached.contains(where: { $0 === c }) { attached.append(c) }
         gp.valueChangedHandler = { [weak self] g, _ in
             self?.lastActive = g.controller
+            self?.noteEvent(g.controller)
             self?.send()
         }
         syncPads()
@@ -354,17 +357,63 @@ final class PadLink: ObservableObject {
 
     // MARK: Benchmark
 
-    private static func loadBenchmark() -> BenchmarkResult? {
-        guard let data = UserDefaults.standard.data(forKey: "lastBenchmark") else { return nil }
-        return try? JSONDecoder().decode(BenchmarkResult.self, from: data)
+    private static func loadSaved() -> [SavedController] {
+        guard let data = UserDefaults.standard.data(forKey: "savedControllers") else { return [] }
+        return (try? JSONDecoder().decode([SavedController].self, from: data)) ?? []
     }
 
-    /// Sends 200 signed pings, 50 ms apart, and summarizes the replies.
+    private func persistSaved() {
+        if let data = try? JSONEncoder().encode(savedControllers) {
+            UserDefaults.standard.set(data, forKey: "savedControllers")
+        }
+    }
+
+    /// Fastest controller first.
+    var sortedControllers: [SavedController] {
+        savedControllers.sorted { ($0.latest?.total ?? .infinity) < ($1.latest?.total ?? .infinity) }
+    }
+
+    func removeController(_ name: String) {
+        savedControllers.removeAll { $0.name == name }
+        persistSaved()
+    }
+
+    func clearSaved() {
+        savedControllers = []
+        persistSaved()
+    }
+
+    private func controllerName(_ c: GCController?) -> String? {
+        guard let c else { return nil }
+        let base = c.vendorName ?? "Controller"
+        return c.productCategory.isEmpty ? base : "\(base) (\(c.productCategory))"
+    }
+
+    private func noteEvent(_ c: GCController?) {
+        guard benchCapturing, let name = controllerName(c) else { return }
+        benchEvents.append((DispatchTime.now().uptimeNanoseconds, name))
+    }
+
+    private func save(_ run: BenchmarkRun, as name: String) {
+        previousRun = savedControllers.first { $0.name == name }?.latest
+        if let i = savedControllers.firstIndex(where: { $0.name == name }) {
+            savedControllers[i].runs.append(run)
+            if savedControllers[i].runs.count > 10 { savedControllers[i].runs.removeFirst() }
+        } else {
+            savedControllers.append(SavedController(name: name, runs: [run]))
+        }
+        persistSaved()
+    }
+
+    /// 10 seconds: 200 signed pings (network) while you move a stick (controller report rate).
     func startBenchmark() {
         guard running, state == .connected, !benchmark.isRunning else {
             if !benchmark.isRunning { benchmark = .failed("Connect to a PC first, then run the benchmark.") }
             return
         }
+        benchEvents = []
+        benchCapturing = true
+        previousRun = nil
         benchmark = .running(0)
         queue.async { [self] in
             benchRTTs = []; benchSeqs = []; benchSent = 0; benchTicks = 0; benchRunning = true
@@ -378,6 +427,7 @@ final class PadLink: ObservableObject {
     }
 
     func cancelBenchmark() {
+        benchCapturing = false
         if benchmark.isRunning { benchmark = .idle }
         queue.async { [self] in
             benchRunning = false
@@ -402,16 +452,19 @@ final class PadLink: ObservableObject {
         benchTimer?.cancel(); benchTimer = nil
         let sent = benchSent, rtts = benchRTTs
         DispatchQueue.main.async {
+            self.benchCapturing = false
             guard self.benchmark.isRunning else { return }  // cancelled meanwhile
             if sent == 0 || rtts.isEmpty {
                 self.benchmark = .failed(sent == 0 ? "Not connected to a PC." : "The PC did not answer any pings. Check the connection and the pairing code.")
                 return
             }
-            let result = BenchmarkResult(rtts: rtts, sent: sent)
-            self.previousBenchmark = self.lastBenchmark
-            self.lastBenchmark = result
-            if let data = try? JSONEncoder().encode(result) { UserDefaults.standard.set(data, forKey: "lastBenchmark") }
-            self.benchmark = .done(result)
+            // The controller you actually moved is the one with the most events.
+            let grouped = Dictionary(grouping: self.benchEvents, by: { $0.1 })
+            let busiest = grouped.max(by: { $0.value.count < $1.value.count })
+            let stats = busiest.flatMap { ControllerStats.make(name: $0.key, times: $0.value.map { $0.0 }) }
+            let run = BenchmarkRun(network: BenchmarkResult(rtts: rtts, sent: sent), controller: stats)
+            if let stats { self.save(run, as: stats.name) }
+            self.benchmark = .done(run)
         }
     }
 

@@ -20,7 +20,7 @@ This is not a real USB connection: iOS cannot act as a USB device. The PC sees a
 - Works with any controller iOS supports (Xbox, DualSense, MFi, ...). Several can be connected at once; their inputs are merged.
 - Swap A/B and X/Y (for Nintendo-style layouts).
 - Keeps running when you switch apps or lock the phone, and starts sending as soon as the app opens.
-- Built-in latency test (round trip to the PC) with a live graph, and a 10-second **benchmark** that reports average, median, 95th percentile, jitter and loss (and compares with your previous run).
+- Built-in latency test (round trip to the PC) with a live graph, plus a 10-second **benchmark** that rates the controller you are using and saves the result per controller, so you can compare controllers.
 - The receiver releases all inputs if the phone goes quiet, so nothing gets stuck.
 - Optional pairing code so only your phone can send input.
 - Stick and trigger dead zones.
@@ -58,7 +58,7 @@ Give the PC a fixed IP (a DHCP reservation in your router) so the address in the
 3. Open PadLink, enter the PC's IP address (`ipconfig` on the PC) once, and tap Start. It starts by itself next time.
 4. Check `joy.cpl` on Windows or any game. Close the app any time; the receiver keeps running.
 
-To measure latency, tap **Test latency** while running for a live graph, or **Run benchmark** for a 10-second test (200 pings) that ends with an average, median, 95th percentile, min, max, jitter and lost-ping percentage, a rating (Excellent under 8 ms, Good under 15, Fair under 30), and a comparison with your previous run. Both measure the round trip phone to PC and back; one way is about half, and controller USB polling is not included. The receiver must be version 0.4.x or newer.
+To measure latency, tap **Test latency** while running for a live graph of the network round trip. To rate a controller, tap **Run benchmark** and move its stick in circles (or mash buttons) for 10 seconds. The app measures two things at once: how often the controller reports input (its report rate, giving the average wait before a press is sent) and the network round trip to the PC (200 pings). **Input latency** = half the average gap between the controller's reports + half the network round trip, and it is saved under the controller's name. Run it with each controller (and each connection, wired or Bluetooth, shows up as a separate run of the same name, so compare over time); the **Saved controllers** card lists them fastest first with the report rate, best result and number of runs. The estimate does not include the PC, the game or your display. The receiver must be version 0.4.x or newer.
 
 ### Tray icon (PC)
 The receiver lives in the notification area. The badge on the icon shows the state: green = phone connected,

@@ -25,6 +25,7 @@ struct ContentView: View {
                     actions
                     if link.testing { LatencyView(rtt: link.rtt, history: link.history) }
                     BenchmarkView(link: link)
+                    SavedControllersView(link: link)
                     Text("\(link.packetsSent) packets sent")
                         .font(.footnote)
                         .foregroundStyle(Theme.muted)
