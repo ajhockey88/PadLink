@@ -43,11 +43,11 @@ jobs:
       - name: Package Windows receiver
         run: |
           cp Windows/padlink_receiver.py Windows/install_startup.ps1 out/
-          echo vgamepad > out/requirements.txt
+          cp Windows/requirements.txt out/requirements.txt
           cd out && zip PadLinkReceiver.zip padlink_receiver.py install_startup.ps1 requirements.txt
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v0.1.11' }}
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v0.2.0' }}
           files: |
             out/PadLink.ipa
             out/PadLinkReceiver.zip

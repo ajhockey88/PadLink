@@ -23,3 +23,18 @@ L3 0x40, R3 0x80, LB 0x100, RB 0x200, GUIDE 0x400, A 0x1000, B 0x2000, X 0x4000,
 | 4   | u64  | sender timestamp (opaque to PC)    |
 
 The receiver echoes the 12 bytes back unchanged; the app measures round-trip time.
+
+## Rumble (PC -> phone, 4 bytes)
+| off | type | field                                  |
+|-----|------|----------------------------------------|
+| 0   | u16  | magic `0x5052` ("PR")                  |
+| 2   | u8   | large (left/low-frequency) motor 0-255 |
+| 3   | u8   | small (right/high-frequency) motor 0-255 |
+
+Sent to the phone's source address whenever the game changes vibration, and resent
+every 100 ms while non-zero. The app stops vibrating if nothing arrives for 600 ms.
+
+## Discovery
+The receiver advertises a Bonjour/mDNS service `_padlink._udp` on port 26760
+(instance name = PC host name). The app browses for it and connects to the service
+endpoint, so no IP address is needed. Manual IP entry remains as a fallback.

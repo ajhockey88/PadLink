@@ -1,26 +1,115 @@
+import AVFoundation
+import CoreHaptics
 import Foundation
 import GameController
 import Network
-import AVFoundation
 import UIKit
 
-/// Reads a wired controller via GameController and streams its state over UDP.
+struct DiscoveredPC: Identifiable, Hashable {
+    let id: String
+    let endpoint: NWEndpoint
+}
+
+enum LinkState {
+    case stopped, searching, connecting, connected, reconnecting
+
+    var text: String {
+        switch self {
+        case .stopped: return "Stopped"
+        case .searching: return "Searching for PC…"
+        case .connecting: return "Connecting…"
+        case .connected: return "Connected"
+        case .reconnecting: return "Reconnecting…"
+        }
+    }
+}
+
+/// One vibration motor on a controller, driven by a looping haptic player whose intensity we update live.
+private final class Motor {
+    private var engine: CHHapticEngine?
+    private var player: CHHapticAdvancedPatternPlayer?
+    private var on = false
+
+    init?(controller: GCController, locality: GCHapticsLocality) {
+        guard let haptics = controller.haptics,
+              haptics.supportedLocalities.contains(locality),
+              let e = haptics.createEngine(withLocality: locality) else { return nil }
+        e.isAutoShutdownEnabled = false
+        e.stoppedHandler = { [weak self] _ in self?.on = false; self?.player = nil }
+        e.resetHandler = { [weak self] in
+            self?.on = false; self?.player = nil
+            try? self?.engine?.start()
+        }
+        do { try e.start() } catch { return nil }
+        engine = e
+    }
+
+    func set(_ value: Float) {
+        do {
+            if value <= 0 {
+                if on { try player?.stop(atTime: CHHapticTimeImmediate); on = false }
+                return
+            }
+            if player == nil { player = try makePlayer() }
+            if !on { try player?.start(atTime: CHHapticTimeImmediate); on = true }
+            let p = CHHapticDynamicParameter(parameterID: .hapticIntensityControl, value: min(value, 1), relativeTime: 0)
+            try player?.sendParameters([p], atTime: CHHapticTimeImmediate)
+        } catch {
+            on = false; player = nil
+        }
+    }
+
+    func stop() {
+        set(0)
+        engine?.stop()
+    }
+
+    private func makePlayer() throws -> CHHapticAdvancedPatternPlayer {
+        let event = CHHapticEvent(
+            eventType: .hapticContinuous,
+            parameters: [CHHapticEventParameter(parameterID: .hapticIntensity, value: 1),
+                         CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.5)],
+            relativeTime: 0, duration: 30)
+        let pattern = try CHHapticPattern(events: [event], parameters: [])
+        let p = try engine!.makeAdvancedPlayer(with: pattern)
+        p.loopEnabled = true
+        return p
+    }
+}
+
+/// Reads wired controllers via GameController, streams them to the PC over UDP, and relays rumble back.
 final class PadLink: ObservableObject {
     static let port: NWEndpoint.Port = 26760
+    static let serviceType = "_padlink._udp"
     static let heartbeat: TimeInterval = 0.004  // resend at 250 Hz so a lost packet self-heals
+    static let historyLength = 120
+    private static let second: UInt64 = 1_000_000_000
 
     @Published var controllerName: String?
     @Published var running = false
     @Published var packetsSent = 0
+    @Published var state: LinkState = .stopped
+    @Published var pcs: [DiscoveredPC] = []
+    @Published var selectedPC: String? = UserDefaults.standard.string(forKey: "pcName")
+    @Published var connectedPC: String?
 
-    // Latency (round trip to the PC receiver), measured ~5x per second while testing.
+    // Latency test (round trip to the PC receiver), measured ~5x per second while testing.
     @Published var testing = false
     @Published var rtt: Double?               // latest, milliseconds
     @Published var history: [Double] = []     // recent samples, -1 = lost
-    private var pingSeq: UInt16 = 0
-    private var pingTimer: DispatchSourceTimer?
-    private var lastReply = DispatchTime.now().uptimeNanoseconds
-    static let historyLength = 120
+
+    @Published var auto = (UserDefaults.standard.object(forKey: "auto") as? Bool) ?? true {
+        didSet {
+            UserDefaults.standard.set(auto, forKey: "auto")
+            if running { queue.async { self.reconnect() } }
+        }
+    }
+    @Published var manualHost = UserDefaults.standard.string(forKey: "host") ?? "" {
+        didSet {
+            UserDefaults.standard.set(manualHost, forKey: "host")
+            if running && !auto { queue.async { self.reconnect() } }
+        }
+    }
 
     // Swap face buttons (e.g. Nintendo-style layout). Read on the network queue, written from the UI.
     @Published var swapAB = UserDefaults.standard.bool(forKey: "swapAB") {
@@ -31,13 +120,31 @@ final class PadLink: ObservableObject {
     }
     private var layout = (UserDefaults.standard.bool(forKey: "swapAB"), UserDefaults.standard.bool(forKey: "swapXY"))
 
+    // Network state: only touched on `queue`.
     private let queue = DispatchQueue(label: "padlink.net", qos: .userInteractive)
     private var connection: NWConnection?
+    private var browser: NWBrowser?
+    private var currentTarget: String?
     private var timer: DispatchSourceTimer?
+    private var tickTimer: DispatchSourceTimer?
     private var seq: UInt16 = 0
+    private var pingSeq: UInt16 = 0
+    private var tickCount = 0
     private var pads: [GCExtendedGamepad] = []
+    private var lastReply: UInt64 = 0        // last time the PC answered (any ping), 0 = never
+    private var lastSampleReply: UInt64 = 0  // for lost-sample accounting in the latency test
+    private var lastReconnect: UInt64 = 0
+    private var searchStarted: UInt64 = 0
+    private var testingQ = false
+
+    // Controller + rumble state: main thread.
     private var attached: [GCController] = []
-    private var host = ""
+    private var lastActive: GCController?
+    private var motorOwner: GCController?
+    private var motorL: Motor?
+    private var motorR: Motor?
+    private var rumbleStamp: UInt64 = 0
+    private var rumbleOn = false
     private let audio = AVAudioEngine()
 
     init() {
@@ -52,17 +159,24 @@ final class PadLink: ObservableObject {
         GCController.controllers().forEach(attach)
     }
 
+    // MARK: Controllers
+
     /// Every connected controller feeds the same virtual pad; their inputs are merged.
     private func attach(_ c: GCController) {
         guard let gp = c.extendedGamepad else { return }
         if !attached.contains(where: { $0 === c }) { attached.append(c) }
-        gp.valueChangedHandler = { [weak self] _, _ in self?.send() }
+        gp.valueChangedHandler = { [weak self] g, _ in
+            self?.lastActive = g.controller
+            self?.send()
+        }
         syncPads()
     }
 
     private func detach(_ c: GCController) {
         attached.removeAll { $0 === c }
         c.extendedGamepad?.valueChangedHandler = nil
+        if lastActive === c { lastActive = nil }
+        if motorOwner === c { stopRumble(); motorOwner = nil; motorL = nil; motorR = nil }
         syncPads()
     }
 
@@ -72,6 +186,8 @@ final class PadLink: ObservableObject {
         let n = attached.count
         controllerName = n == 0 ? nil : (attached[0].vendorName ?? "Controller") + (n > 1 ? " (+\(n - 1) more)" : "")
     }
+
+    // MARK: Background keep-alive
 
     /// A silent audio session keeps the app running when you switch apps or lock the phone.
     private func startKeepAlive() {
@@ -96,47 +212,162 @@ final class PadLink: ObservableObject {
         DispatchQueue.main.async { UIApplication.shared.isIdleTimerDisabled = false }
     }
 
-    func start(host: String) {
-        guard !host.isEmpty else { return }
-        self.host = host
-        connect()
-        running = true
-        startKeepAlive()
+    // MARK: Start / stop
 
-        let t = DispatchSource.makeTimerSource(queue: queue)
-        t.schedule(deadline: .now(), repeating: Self.heartbeat)
-        t.setEventHandler { [weak self] in self?.send() }
-        t.resume()
-        timer = t
+    func start() {
+        guard !running else { return }
+        running = true
+        state = .searching
+        startKeepAlive()
+        queue.async { [self] in
+            let now = DispatchTime.now().uptimeNanoseconds
+            lastReply = 0; lastReconnect = now; searchStarted = now
+            openLink()
+
+            let t = DispatchSource.makeTimerSource(queue: queue)
+            t.schedule(deadline: .now(), repeating: Self.heartbeat)
+            t.setEventHandler { [weak self] in self?.sendNow() }
+            t.resume()
+            timer = t
+
+            let k = DispatchSource.makeTimerSource(queue: queue)
+            k.schedule(deadline: .now() + 0.2, repeating: 0.2)
+            k.setEventHandler { [weak self] in self?.tick() }
+            k.resume()
+            tickTimer = k
+        }
     }
 
-    /// Latency test runs only on demand so normal use sends nothing extra.
+    func stop() {
+        stopTest()
+        running = false
+        state = .stopped
+        connectedPC = nil
+        stopRumble()
+        queue.async { [self] in
+            timer?.cancel(); timer = nil
+            tickTimer?.cancel(); tickTimer = nil
+            browser?.cancel(); browser = nil
+            connection?.cancel(); connection = nil
+            currentTarget = nil
+        }
+        stopKeepAlive()
+    }
+
+    func select(_ pc: DiscoveredPC) {
+        UserDefaults.standard.set(pc.id, forKey: "pcName")
+        selectedPC = pc.id
+        queue.async { self.connect(to: pc.endpoint, name: pc.id) }
+    }
+
+    // MARK: Latency test
+
+    /// The test pings 5x/s and records samples; normal use only sends a 1 Hz status ping.
     func startTest() {
-        guard running, pingTimer == nil else { return }
-        lastReply = DispatchTime.now().uptimeNanoseconds
+        guard running, !testing else { return }
         history = []; rtt = nil
         testing = true
-        let p = DispatchSource.makeTimerSource(queue: queue)
-        p.schedule(deadline: .now(), repeating: 0.2)
-        p.setEventHandler { [weak self] in self?.ping() }
-        p.resume()
-        pingTimer = p
+        queue.async { self.testingQ = true; self.lastSampleReply = DispatchTime.now().uptimeNanoseconds }
     }
 
     func stopTest() {
-        pingTimer?.cancel(); pingTimer = nil
         testing = false
         rtt = nil; history = []
+        queue.async { self.testingQ = false }
     }
 
-    private func ping() {
-        guard let conn = connection else { return }
+    // MARK: Connection management (queue)
+
+    private func openLink() {
+        if auto { startBrowsing() } else { connectManual() }
+    }
+
+    private func startBrowsing() {
+        browser?.cancel()
+        let b = NWBrowser(for: .bonjour(type: Self.serviceType, domain: nil), using: NWParameters())
+        b.browseResultsChangedHandler = { [weak self] results, _ in self?.found(results) }
+        b.start(queue: queue)
+        browser = b
+    }
+
+    private func found(_ results: Set<NWBrowser.Result>) {
+        let list = results.compactMap { r -> DiscoveredPC? in
+            if case let .service(name, _, _, _) = r.endpoint { return DiscoveredPC(id: name, endpoint: r.endpoint) }
+            return nil
+        }.sorted { $0.id < $1.id }
+        DispatchQueue.main.async { self.pcs = list }
+        guard auto else { return }
+        let saved = UserDefaults.standard.string(forKey: "pcName")
+        let target = list.first { $0.id == saved } ?? (list.count == 1 ? list[0] : nil)
+        if let target, currentTarget != target.id { connect(to: target.endpoint, name: target.id) }
+    }
+
+    private func connectManual() {
+        let host = manualHost.trimmingCharacters(in: .whitespaces)
+        guard !host.isEmpty else { return }
+        connect(to: .hostPort(host: NWEndpoint.Host(host), port: Self.port), name: "ip:" + host)
+    }
+
+    private func connect(to endpoint: NWEndpoint, name: String) {
+        let params = NWParameters.udp
+        params.serviceClass = .interactiveVoice
+        let conn = NWConnection(to: endpoint, using: params)
+        conn.start(queue: queue)
+        connection?.cancel()
+        connection = conn
+        currentTarget = name
+        lastReply = 0
+        lastReconnect = DispatchTime.now().uptimeNanoseconds
+        receive(conn)
+        DispatchQueue.main.async { self.connectedPC = name.hasPrefix("ip:") ? String(name.dropFirst(3)) : name }
+    }
+
+    /// Throw the link away and build it again (PC moved, Wi-Fi roamed, receiver restarted...).
+    private func reconnect() {
+        connection?.cancel(); connection = nil
+        currentTarget = nil
+        lastReconnect = DispatchTime.now().uptimeNanoseconds
+        searchStarted = lastReconnect
+        openLink()
+    }
+
+    private func setState(_ s: LinkState) {
+        DispatchQueue.main.async { if self.running && self.state != s { self.state = s } }
+    }
+
+    /// Every 0.2 s: status ping, lost-sample accounting, connection watchdog, rumble watchdog.
+    private func tick() {
         let now = DispatchTime.now().uptimeNanoseconds
-        // Anything unanswered for a full second counts as a lost sample.
-        if now - lastReply > 1_000_000_000 {
-            lastReply = now
+        tickCount += 1
+        if testingQ || tickCount % 5 == 0 { sendPing(now) }
+
+        if testingQ, now - lastSampleReply > Self.second {
+            lastSampleReply = now
             publish(-1)
         }
+
+        if lastReply != 0, now - lastReply < 3 * Self.second {
+            setState(.connected)
+        } else if connection == nil {
+            setState(.searching)
+            // Old receiver without discovery, or no PC found: fall back to the typed IP.
+            if auto, !manualHost.isEmpty, now - searchStarted > 4 * Self.second { connectManual() }
+        } else if lastReply == 0, now - lastReconnect < 3 * Self.second {
+            setState(.connecting)
+        } else {
+            setState(.reconnecting)
+            if now - lastReconnect > 3 * Self.second { reconnect() }
+        }
+
+        DispatchQueue.main.async {
+            if self.rumbleOn, now - self.rumbleStamp > 600_000_000 { self.stopRumble() }
+        }
+    }
+
+    // MARK: Packets (queue)
+
+    private func sendPing(_ now: UInt64) {
+        guard let conn = connection else { return }
         var d = Data(capacity: 12)
         func put<T: FixedWidthInteger>(_ v: T) { withUnsafeBytes(of: v.littleEndian) { d.append(contentsOf: $0) } }
         put(UInt16(0x5049)); put(pingSeq); put(now)
@@ -150,9 +381,19 @@ final class PadLink: ObservableObject {
             if let data, data.count == 12 {
                 let sent = data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 4, as: UInt64.self) }
                 let now = DispatchTime.now().uptimeNanoseconds
-                if now >= UInt64(littleEndian: sent) {
+                let t0 = UInt64(littleEndian: sent)
+                if now >= t0 {
                     self.lastReply = now
-                    self.publish(Double(now - UInt64(littleEndian: sent)) / 1_000_000)
+                    if self.testingQ {
+                        self.lastSampleReply = now
+                        self.publish(Double(now - t0) / 1_000_000)
+                    }
+                }
+            } else if let data, data.count == 4 {
+                let magic = data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 0, as: UInt16.self) }
+                if UInt16(littleEndian: magic) == 0x5052 {
+                    let large = data[2], small = data[3]
+                    DispatchQueue.main.async { self.applyRumble(large, small) }
                 }
             }
             if error == nil { self.receive(conn) }
@@ -161,44 +402,56 @@ final class PadLink: ObservableObject {
 
     private func publish(_ ms: Double) {
         DispatchQueue.main.async {
+            guard self.testing else { return }
             self.rtt = ms >= 0 ? ms : nil
             self.history.append(ms)
             if self.history.count > Self.historyLength { self.history.removeFirst() }
         }
     }
 
-    private func connect() {
-        let params = NWParameters.udp
-        params.serviceClass = .interactiveVoice
-        let conn = NWConnection(host: NWEndpoint.Host(host), port: Self.port, using: params)
-        conn.stateUpdateHandler = { [weak self, weak conn] state in
-            // Network changes (Wi-Fi roam, app resume) can fail the socket; rebuild it.
-            guard let self, let conn, self.connection === conn else { return }
-            if case .failed = state { conn.cancel(); self.connect() }
-        }
-        conn.start(queue: queue)
-        connection?.cancel()
-        connection = conn
-        receive(conn)
-    }
-
-    func stop() {
-        timer?.cancel(); timer = nil
-        connection?.cancel(); connection = nil
-        stopTest()
-        running = false
-        stopKeepAlive()
-    }
-
     private func send() {
-        queue.async { [self] in
-            guard let conn = connection, !pads.isEmpty else { return }
-            let data = Self.encode(pads, seq: seq, swapAB: layout.0, swapXY: layout.1)
-            seq &+= 1
-            conn.send(content: data, completion: .idempotent)
-            DispatchQueue.main.async { self.packetsSent += 1 }
+        queue.async { self.sendNow() }
+    }
+
+    private func sendNow() {
+        guard let conn = connection, !pads.isEmpty else { return }
+        let data = Self.encode(pads, seq: seq, swapAB: layout.0, swapXY: layout.1)
+        seq &+= 1
+        conn.send(content: data, completion: .idempotent)
+        DispatchQueue.main.async { self.packetsSent += 1 }
+    }
+
+    // MARK: Rumble (main)
+
+    private func applyRumble(_ large: UInt8, _ small: UInt8) {
+        rumbleStamp = DispatchTime.now().uptimeNanoseconds
+        rumbleOn = large > 0 || small > 0
+        guard let c = lastActive ?? attached.first else { return }
+        if motorOwner !== c { buildMotors(for: c) }
+        if let l = motorL, let r = motorR {
+            l.set(Float(large) / 255); r.set(Float(small) / 255)
+        } else if let m = motorL {
+            m.set(Float(max(large, small)) / 255)
         }
     }
+
+    private func buildMotors(for c: GCController) {
+        motorL?.stop(); motorR?.stop()
+        motorL = nil; motorR = nil
+        motorOwner = c
+        if let l = Motor(controller: c, locality: .leftHandle), let r = Motor(controller: c, locality: .rightHandle) {
+            motorL = l; motorR = r
+        } else {
+            motorL = Motor(controller: c, locality: .default) ?? Motor(controller: c, locality: .all)
+        }
+    }
+
+    private func stopRumble() {
+        rumbleOn = false
+        motorL?.set(0); motorR?.set(0)
+    }
+
+    // MARK: Encoding
 
     static func encode(_ pads: [GCExtendedGamepad], seq: UInt16, swapAB: Bool, swapXY: Bool) -> Data {
         var b: UInt16 = 0

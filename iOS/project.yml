@@ -7,11 +7,16 @@ targets:
     platform: iOS
     deploymentTarget: "16.0"
     sources: [PadLink]
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: PadLink
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UIBackgroundModes: [audio]
+        NSLocalNetworkUsageDescription: "Find your PC and send controller input to it."
+        NSBonjourServices: ["_padlink._udp"]
     settings:
-      GENERATE_INFOPLIST_FILE: YES
-      INFOPLIST_KEY_NSLocalNetworkUsageDescription: "Send controller input to your PC."
-      INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
-      INFOPLIST_KEY_UILaunchScreen_Generation: YES
-      INFOPLIST_KEY_UIRequiredDeviceCapabilities: ""
-      INFOPLIST_KEY_UIBackgroundModes: audio
+      GENERATE_INFOPLIST_FILE: NO
       PRODUCT_BUNDLE_IDENTIFIER: com.example.padlink
