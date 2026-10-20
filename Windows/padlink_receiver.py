@@ -4,7 +4,10 @@ Runs with a system tray icon (status, Disable/Enable, Quit). Use `--no-tray` for
 Requires ViGEmBus (https://github.com/nefarius/ViGEmBus) and `pip install -r requirements.txt`.
 """
 import gc
+import hashlib
+import json
 import os
+import re
 import shutil
 import socket
 import struct
@@ -15,6 +18,11 @@ import time
 import traceback
 
 vg = None  # imported lazily: `import vgamepad` connects to the driver, so the driver must exist first
+
+VERSION = "dev"  # replaced with the release version when the exe is built
+REPO = "ajhockey88/PadLink"
+RELEASES_URL = f"https://github.com/{REPO}/releases/latest"
+CHECK_EVERY = 12 * 3600  # seconds between automatic update checks
 
 PORT = 26760
 MAGIC = 0x504C
@@ -60,7 +68,7 @@ def log(msg):
 
 _pad = None
 _state = {"sock": None, "phone": None, "large": 0, "small": 0,
-          "enabled": True, "quit": False, "error": False, "note": "", "last_seen": 0.0, "phone_ip": None}
+          "enabled": True, "quit": False, "error": False, "note": "", "update": None, "notified": None, "last_seen": 0.0, "phone_ip": None}
 _started = {"rumble": False, "watch": False}
 _zeroconf = {"zc": None, "addrs": []}
 
@@ -484,6 +492,141 @@ def refresh_autostart_path():
         pass
 
 
+# ------------------------------------------------------------------ updates
+
+def load_settings():
+    try:
+        with open(os.path.join(APP_DIR, "settings.json")) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_settings(**changes):
+    settings = load_settings()
+    settings.update(changes)
+    try:
+        with open(os.path.join(APP_DIR, "settings.json"), "w") as f:
+            json.dump(settings, f)
+    except OSError:
+        log("Could not save settings: " + traceback.format_exc())
+
+
+def version_tuple(v):
+    nums = [int(n) for n in re.findall(r"\d+", v or "")][:3]
+    return tuple(nums + [0] * (3 - len(nums)))
+
+
+def check_update():
+    """Ask GitHub for the latest release. Sets _state['update'] and returns it (None if up to date)."""
+    import urllib.request
+    req = urllib.request.Request(f"https://api.github.com/repos/{REPO}/releases/latest",
+                                 headers={"User-Agent": "PadLink-updater", "Accept": "application/vnd.github+json"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        data = json.load(r)
+    tag = data.get("tag_name", "")
+    asset = next((a for a in data.get("assets", []) if a.get("name") == "PadLinkReceiver.exe"), None)
+    if asset and version_tuple(tag) > version_tuple(VERSION):
+        sha = (asset.get("digest") or "").lower().replace("sha256:", "")
+        _state["update"] = {"tag": tag, "url": asset["browser_download_url"], "sha": sha}
+    else:
+        _state["update"] = None
+    return _state["update"]
+
+
+def download_update(update, dest):
+    """Download the new exe and verify it against the SHA-256 GitHub publishes for the asset."""
+    import urllib.request
+    if not update["url"].startswith(f"https://github.com/{REPO}/releases/download/"):
+        raise RuntimeError("unexpected download address")
+    if len(update["sha"]) != 64:
+        raise RuntimeError("the release has no checksum, so it is not installed automatically")
+    digest = hashlib.sha256()
+    req = urllib.request.Request(update["url"], headers={"User-Agent": "PadLink-updater"})
+    with urllib.request.urlopen(req, timeout=60) as r, open(dest, "wb") as f:
+        while True:
+            chunk = r.read(1 << 20)
+            if not chunk:
+                break
+            f.write(chunk)
+            digest.update(chunk)
+    if digest.hexdigest() != update["sha"]:
+        os.remove(dest)
+        raise RuntimeError("downloaded file did not match its checksum")
+
+
+def swap_and_restart_script(new, target, pids):
+    """PowerShell run after we exit: put the new exe in place (retrying while Windows lets go), start it."""
+    q = lambda path: "'" + path.replace("'", "''") + "'"
+    waits = "".join(f"Wait-Process -Id {int(pid)} -Timeout 30 -ErrorAction SilentlyContinue; " for pid in pids)
+    move = f"Move-Item -LiteralPath {q(new)} -Destination {q(target)} -Force -ErrorAction Stop"
+    start = f"Start-Process -FilePath {q(target)}"
+    return (waits +
+            "$ok = $false; for ($i = 0; $i -lt 40 -and -not $ok; $i++) { try { " + move + "; $ok = $true } "
+            "catch { Start-Sleep -Milliseconds 500 } }; "
+            "if ($ok) { " + start + " }")
+
+
+def install_update(icon):
+    update = _state["update"]
+    if not update:
+        return
+    if not FROZEN:
+        import webbrowser
+        webbrowser.open(RELEASES_URL)
+        return
+    target = os.path.abspath(sys.executable)
+    new = target + ".new"
+    try:
+        _state["note"] = f"downloading {update['tag']}"
+        try:
+            download_update(update, new)
+        except OSError:  # folder not writable: use the temp folder instead
+            import tempfile
+            new = os.path.join(tempfile.gettempdir(), "PadLinkReceiver.new.exe")
+            download_update(update, new)
+        _state["note"] = ""
+        pids = [os.getpid(), os.getppid()]  # the exe and its one-file launcher process
+        script = swap_and_restart_script(new, target, pids)
+        env = dict(os.environ, PYINSTALLER_RESET_ENVIRONMENT="1")
+        subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass",
+                          "-Command", script], env=env, close_fds=True,
+                         creationflags=NO_WINDOW | 0x00000008 | 0x00000200)  # no window, detached
+        log(f"Updating to {update['tag']}")
+        _state["quit"] = True
+        icon.stop()
+    except Exception as e:
+        _state["note"] = ""
+        log("Update failed: " + traceback.format_exc())
+        notify(icon, f"Update failed: {e}")
+
+
+def notify(icon, message, title="PadLink"):
+    try:
+        icon.notify(message, title)
+    except Exception:
+        pass
+
+
+def update_checker(icon):
+    time.sleep(30)  # let startup settle first
+    while not _state["quit"]:
+        if load_settings().get("auto_update_check", True):
+            try:
+                update = check_update()
+                if update and update["tag"] != _state["notified"]:
+                    _state["notified"] = update["tag"]
+                    notify(icon, f"PadLink {update['tag']} is available. Right-click the tray icon to install it.",
+                           "PadLink update")
+                    icon.update_menu()
+            except Exception:
+                log("Update check failed: " + traceback.format_exc())
+        for _ in range(CHECK_EVERY // 5):
+            if _state["quit"]:
+                return
+            time.sleep(5)
+
+
 def run_tray():
     import pystray
 
@@ -514,14 +657,42 @@ def run_tray():
         _state["quit"] = True
         icon.stop()
 
+    def check_now(icon, item):
+        def work():
+            try:
+                update = check_update()
+                icon.update_menu()
+                if update:
+                    notify(icon, f"PadLink {update['tag']} is available. Right-click the tray icon to install it.",
+                           "PadLink update")
+                else:
+                    notify(icon, f"You are up to date (version {VERSION}).", "PadLink update")
+            except Exception:
+                log("Update check failed: " + traceback.format_exc())
+                notify(icon, "Could not check for updates. Are you online?", "PadLink update")
+        threading.Thread(target=work, daemon=True).start()
+
+    def toggle_auto_check(icon, item):
+        save_settings(auto_update_check=not load_settings().get("auto_update_check", True))
+        icon.update_menu()
+
+    def do_update(icon, item):
+        threading.Thread(target=install_update, args=(icon,), daemon=True).start()
+
     menu = pystray.Menu(
         pystray.MenuItem(lambda item: status()[1], None, enabled=False),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(lambda item: "Enable" if not _state["enabled"] else "Disable", toggle),
         pystray.MenuItem("Run at login", toggle_autostart, checked=lambda item: _state.get("autostart", False),
                          visible=sys.platform == "win32"),
-        pystray.MenuItem("Open log", open_log),
         pystray.Menu.SEPARATOR,
+        pystray.MenuItem(lambda item: f"Install update {_state['update']['tag']}" if _state["update"] else "",
+                         do_update, visible=lambda item: bool(_state["update"])),
+        pystray.MenuItem(lambda item: f"Check for updates (this is {VERSION})", check_now),
+        pystray.MenuItem("Check automatically", toggle_auto_check,
+                         checked=lambda item: load_settings().get("auto_update_check", True)),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem("Open log", open_log),
         pystray.MenuItem("Quit", quit_app),
     )
     kind, text = status()
@@ -529,6 +700,7 @@ def run_tray():
 
     def refresh(icon):
         icon.visible = True
+        threading.Thread(target=update_checker, args=(icon,), daemon=True).start()
         shown = None
         while not _state["quit"]:
             now = status()

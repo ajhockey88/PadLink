@@ -22,7 +22,7 @@ This is not a real USB connection: iOS cannot act as a USB device. The PC sees a
 - Keeps running when you switch apps or lock the phone, and starts sending as soon as the app opens.
 - Built-in latency test (round trip to the PC) with a live graph.
 - The receiver releases all inputs if the phone goes quiet, so nothing gets stuck.
-- PC tray icon with live status, Disable / Enable, Run at login, Open log and Quit.
+- PC tray icon with live status, Disable / Enable, Run at login, self-update, Open log and Quit.
 
 ## Install
 
@@ -35,7 +35,9 @@ Download both files from the [latest release](https://github.com/ajhockey88/PadL
 4. Allow it through Windows Firewall when asked (private networks; if your Ethernet shows as Public, allow that too). It uses UDP 26760, plus 5353 for finding the PC.
 5. To start it automatically at every login, right-click the tray icon and tick **Run at login**. This copies the exe to `%LOCALAPPDATA%\PadLink` so you can delete the download.
 
-Windows SmartScreen may warn because the exe is not code-signed: choose **More info** then **Run anyway**. To update, right-click the tray icon, **Quit**, then run the new exe (with Run at login ticked it updates its saved copy the next time you run it).
+Windows SmartScreen may warn because the exe is not code-signed: choose **More info** then **Run anyway**.
+
+**Updates:** PadLink checks GitHub for a new release about once a day (tray menu > **Check automatically** to turn that off) and pops up a notice. Right-click the tray icon > **Install update vX** to download it, verify its checksum, and restart on the new version; no manual download. **Check for updates** checks right now. The iPhone app is not covered; reinstall its `.ipa` with Sideloadly. (Versions before 0.4.1 have no updater: replace them by hand once.)
 
 Advanced / from source: unzip `PadLinkReceiver.zip`, install Python 3.12+, run `pip install -r requirements.txt` and `python padlink_receiver.py`
 (`--no-tray` for console only). `install_startup.ps1` makes a scheduled task that also restarts it after a crash; the tray toggle detects and can remove that task.
@@ -59,7 +61,7 @@ To measure latency, tap **Test latency** while running. The receiver must be the
 ### Tray icon (PC)
 The receiver lives in the notification area. The badge on the icon shows the state: green = phone connected,
 amber = waiting for the phone, gray = disabled, red = error. Right-click for status, **Disable** / **Enable**
-(Disable removes the virtual controller and stops answering the phone), **Run at login**, **Open log** and **Quit**.
+(Disable removes the virtual controller and stops answering the phone), **Run at login**, **Install update** / **Check for updates**, **Open log** and **Quit**.
 Pass `--no-tray` to run without it.
 
 ## Connection options
