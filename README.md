@@ -29,15 +29,16 @@ This is not a real USB connection: iOS cannot act as a USB device. The PC sees a
 Download both files from the [latest release](https://github.com/ajhockey88/PadLink/releases/latest).
 
 ### PC (Windows 11)
-1. Install [Python 3.12+](https://www.python.org/downloads/) (tick "Add python.exe to PATH").
-2. Install the [ViGEmBus driver](https://github.com/nefarius/ViGEmBus/releases) and reboot if asked.
-3. Unzip `PadLinkReceiver.zip` to a permanent folder, e.g. `C:\PadLink`.
-4. In that folder run `pip install -r requirements.txt`.
-5. Run `python padlink_receiver.py`. A PadLink icon appears in the system tray, you hear a controller chime, and the console shows "PadLink listening on UDP 26760".
-6. Allow Python through Windows Firewall for UDP 26760 (private networks; if your Ethernet shows as Public, allow that too).
-7. To start it automatically at every login, right-click the tray icon and tick **Run at login** (untick to turn it off).
-   Advanced: `powershell -ExecutionPolicy Bypass -File install_startup.ps1` instead makes a scheduled task that also restarts
-   it if it crashes; the tray toggle detects and can remove that task.
+1. Download `PadLinkReceiver.exe` and double-click it. Nothing else to install.
+2. First run only: it installs the virtual-controller driver (ViGEmBus). Approve the Windows prompt. If it still says the driver is missing afterwards, restart Windows once.
+3. A PadLink icon appears in the system tray (click `^` if hidden) and you hear a controller chime.
+4. Allow it through Windows Firewall when asked (private networks; if your Ethernet shows as Public, allow that too). It uses UDP 26760, plus 5353 for finding the PC.
+5. To start it automatically at every login, right-click the tray icon and tick **Run at login**. This copies the exe to `%LOCALAPPDATA%\PadLink` so you can delete the download.
+
+Windows SmartScreen may warn because the exe is not code-signed: choose **More info** then **Run anyway**. To update, right-click the tray icon, **Quit**, then run the new exe (with Run at login ticked it updates its saved copy the next time you run it).
+
+Advanced / from source: unzip `PadLinkReceiver.zip`, install Python 3.12+, run `pip install -r requirements.txt` and `python padlink_receiver.py`
+(`--no-tray` for console only). `install_startup.ps1` makes a scheduled task that also restarts it after a crash; the tray toggle detects and can remove that task.
 
 Give the PC a fixed IP (a DHCP reservation in your router) so the address in the app does not change.
 
@@ -74,10 +75,10 @@ on the router and keep the phone out of Low Power Mode.
 ## Troubleshooting
 - **Nothing happens when I run the receiver:** another copy may already own the port. Look for its tray icon and use Quit, or
   `Stop-Process -Name python, pythonw -Force` if you don't use Python for anything else. The receiver prints what it is doing.
-- **Startup error mentioning ViGEm:** install the ViGEmBus driver and reboot.
+- **"Driver missing" / startup error mentioning ViGEm:** the exe installs the driver on first run; if you declined the prompt, right-click the tray icon and choose **Enable** to retry, then restart Windows. Manual installer: [ViGEmBus releases](https://github.com/nefarius/ViGEmBus/releases).
 - **No controller in `joy.cpl`:** the receiver creates it at start; look for the chime and the console message.
 - **Latency test shows "No reply":** wrong IP, receiver not running, or the firewall is blocking UDP 26760.
-- **Errors are also written to `padlink.log`** next to the receiver script.
+- **Errors are also written to `padlink.log`** next to the exe (tray menu > **Open log**).
 
 ## Limits
 - One virtual Xbox 360 pad. Several physical controllers are merged into it, not split into players.
@@ -91,7 +92,7 @@ The app icon (a controller sending a signal) and its source files are in [`desig
 The in-app logo (`iOS/PadLink/LogoMark.swift`) is the same artwork drawn as a vector.
 
 ## Build from source
-Releases are built by GitHub Actions (`.github/workflows/release.yml`, manual "Run workflow"). The iOS app
+Releases are built by GitHub Actions (`.github/workflows/release.yml`, manual "Run workflow"). The PC exe is `Windows/padlink_receiver.py` packed with PyInstaller on a Windows runner (the `vgamepad` driver installer is bundled and run on first launch). The iOS app
 is generated with [XcodeGen](https://github.com/yonaskolb/XcodeGen) from `iOS/project.yml` on a macOS runner and
 packaged as an unsigned IPA for sideloading. The receiver is `Windows/padlink_receiver.py`.
 The wire format is in [PROTOCOL.md](PROTOCOL.md).

@@ -33,8 +33,44 @@ jobs:
       - uses: actions/upload-artifact@v4
         with: { name: ipa, path: iOS/PadLink.ipa }
 
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Fetch vgamepad source without running its setup.py (that launches a driver installer)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dl | Out-Null
+          Invoke-WebRequest https://files.pythonhosted.org/packages/source/v/vgamepad/vgamepad-0.1.0.tar.gz -OutFile dl/vgamepad.tar.gz
+          $hash = (Get-FileHash dl/vgamepad.tar.gz -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne "57f6bd01aec0c172947517fb782d150ef9b285f7f4d524c317374fa5c24a89de") { throw "vgamepad checksum mismatch: $hash" }
+          tar -xzf dl/vgamepad.tar.gz -C dl
+      - run: pip install pyinstaller zeroconf pystray pillow
+      - name: Prepare icon files
+        shell: pwsh
+        run: |
+          Copy-Item design/icon-256.png icon.png
+          python -c "from PIL import Image; Image.open('design/icon-256.png').save('icon.ico', sizes=[(256,256),(64,64),(48,48),(32,32),(16,16)])"
+      - name: Build PadLinkReceiver.exe
+        shell: pwsh
+        run: |
+          pyinstaller --onefile --noconsole --name PadLinkReceiver --icon icon.ico `
+            --paths dl/vgamepad-0.1.0 `
+            --add-data "dl/vgamepad-0.1.0/vgamepad/win/vigem;vgamepad/win/vigem" `
+            --add-data "icon.png;." `
+            --hidden-import vgamepad.win.virtual_gamepad --hidden-import ifaddr --hidden-import pystray._win32 `
+            --exclude-module libevdev `
+            Windows/padlink_receiver.py
+          if (-not (Test-Path dist/PadLinkReceiver.exe)) { throw "exe was not built" }
+          Get-Item dist/PadLinkReceiver.exe | Select-Object Name, Length
+      - uses: actions/upload-artifact@v4
+        with: { name: receiver-exe, path: dist/PadLinkReceiver.exe }
+
   release:
-    needs: [ios]
+    needs: [ios, windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -48,8 +84,9 @@ jobs:
           cd out && zip PadLinkReceiver.zip padlink_receiver.py install_startup.ps1 requirements.txt icon.png
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v0.3.1' }}
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v0.4.0' }}
           files: |
             out/PadLink.ipa
+            out/PadLinkReceiver.exe
             out/PadLinkReceiver.zip
           generate_release_notes: true

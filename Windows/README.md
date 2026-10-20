@@ -1,5 +1,7 @@
 # PadLink receiver (Windows 11)
 
+Most people should just download `PadLinkReceiver.exe` from the release (see the main README); it bundles everything and installs the driver on first run. The notes below are for running from source.
+
 1. Install ViGEmBus: https://github.com/nefarius/ViGEmBus/releases
 2. `pip install -r requirements.txt` (installs `vgamepad`)
 3. `python padlink_receiver.py`
