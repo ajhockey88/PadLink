@@ -100,3 +100,6 @@ packaged as an unsigned IPA for sideloading. The receiver is `Windows/padlink_re
 The wire format is in [PROTOCOL.md](PROTOCOL.md).
 
 Not tested on every controller or network; reports and fixes are welcome.
+
+## License
+PadLink is released under the [MIT License](LICENSE). The Windows exe bundles third-party components under their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
