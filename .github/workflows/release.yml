@@ -58,8 +58,7 @@ jobs:
           Copy-Item design/icon-256.png icon.png
           python -c "from PIL import Image; Image.open('design/icon-256.png').save('icon.ico', sizes=[(256,256),(64,64),(48,48),(32,32),(16,16)])"
       - name: Stamp the release version into the exe
-        shell: pwsh
-        run: python -c "import os; p='Windows/padlink_receiver.py'; s=open(p).read(); assert 'VERSION = \"dev\"' in s; open(p,'w').write(s.replace('VERSION = \"dev\"', 'VERSION = \"' + os.environ['RELEASE_TAG'].lstrip('v') + '\"'))"
+        run: python Windows/stamp_version.py
       - name: Build PadLinkReceiver.exe
         shell: pwsh
         run: |
