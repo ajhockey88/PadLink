@@ -22,7 +22,7 @@ This is not a real USB connection: iOS cannot act as a USB device. The PC sees a
 - Keeps running when you switch apps or lock the phone, and starts sending as soon as the app opens.
 - Built-in latency test (round trip to the PC) with a live graph.
 - The receiver releases all inputs if the phone goes quiet, so nothing gets stuck.
-- PC tray icon with live status, Disable / Enable, Open log and Quit.
+- PC tray icon with live status, Disable / Enable, Run at login, Open log and Quit.
 
 ## Install
 
@@ -35,8 +35,9 @@ Download both files from the [latest release](https://github.com/ajhockey88/PadL
 4. In that folder run `pip install -r requirements.txt`.
 5. Run `python padlink_receiver.py`. A PadLink icon appears in the system tray, you hear a controller chime, and the console shows "PadLink listening on UDP 26760".
 6. Allow Python through Windows Firewall for UDP 26760 (private networks; if your Ethernet shows as Public, allow that too).
-7. Optional, to start it hidden at every login: `powershell -ExecutionPolicy Bypass -File install_startup.ps1`.
-   Stop it with `Stop-ScheduledTask PadLinkReceiver`, remove it with `Unregister-ScheduledTask PadLinkReceiver`.
+7. To start it automatically at every login, right-click the tray icon and tick **Run at login** (untick to turn it off).
+   Advanced: `powershell -ExecutionPolicy Bypass -File install_startup.ps1` instead makes a scheduled task that also restarts
+   it if it crashes; the tray toggle detects and can remove that task.
 
 Give the PC a fixed IP (a DHCP reservation in your router) so the address in the app does not change.
 
@@ -57,7 +58,7 @@ To measure latency, tap **Test latency** while running. The receiver must be the
 ### Tray icon (PC)
 The receiver lives in the notification area. The badge on the icon shows the state: green = phone connected,
 amber = waiting for the phone, gray = disabled, red = error. Right-click for status, **Disable** / **Enable**
-(Disable removes the virtual controller and stops answering the phone), **Open log** and **Quit**.
+(Disable removes the virtual controller and stops answering the phone), **Run at login**, **Open log** and **Quit**.
 Pass `--no-tray` to run without it.
 
 ## Connection options

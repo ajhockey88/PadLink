@@ -7,6 +7,7 @@ import gc
 import os
 import socket
 import struct
+import subprocess
 import sys
 import threading
 import time
@@ -320,8 +321,86 @@ def make_icon(kind):
     return base
 
 
+RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+RUN_NAME = "PadLink"
+LEGACY_TASK = "PadLinkReceiver"  # the scheduled task made by install_startup.ps1
+NO_WINDOW = 0x08000000
+
+
+def autostart_command():
+    """Command Windows runs at login: this script, hidden (pythonw), from where it is now."""
+    exe = sys.executable
+    pyw = os.path.join(os.path.dirname(exe), "pythonw.exe")
+    if os.path.exists(pyw):
+        exe = pyw
+    return f'"{exe}" "{os.path.abspath(__file__)}"'
+
+
+def autostart_enabled():
+    """True if PadLink starts at login (startup entry, or the older scheduled task)."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
+            winreg.QueryValueEx(key, RUN_NAME)
+        return True
+    except OSError:
+        pass
+    try:
+        return subprocess.run(["schtasks", "/Query", "/TN", LEGACY_TASK], capture_output=True,
+                              creationflags=NO_WINDOW).returncode == 0
+    except Exception:
+        return False
+
+
+def set_autostart(on):
+    import winreg
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
+        if on:
+            winreg.SetValueEx(key, RUN_NAME, 0, winreg.REG_SZ, autostart_command())
+        else:
+            try:
+                winreg.DeleteValue(key, RUN_NAME)
+            except FileNotFoundError:
+                pass
+    if not on:
+        # Also remove the scheduled task from install_startup.ps1, if there is one.
+        try:
+            r = subprocess.run(["schtasks", "/Delete", "/TN", LEGACY_TASK, "/F"], capture_output=True,
+                               creationflags=NO_WINDOW)
+            if r.returncode != 0 and b"cannot find" not in (r.stderr or b"").lower():
+                log("Could not remove scheduled task (run PowerShell as admin: "
+                    f"Unregister-ScheduledTask {LEGACY_TASK} -Confirm:$false)")
+        except Exception:
+            pass
+
+
+def refresh_autostart_path():
+    """If you moved the folder, point the startup entry at the new location."""
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_READ | winreg.KEY_SET_VALUE) as key:
+            if winreg.QueryValueEx(key, RUN_NAME)[0] != autostart_command():
+                winreg.SetValueEx(key, RUN_NAME, 0, winreg.REG_SZ, autostart_command())
+    except Exception:
+        pass
+
+
 def run_tray():
     import pystray
+
+    _state["autostart"] = autostart_enabled()
+    if sys.platform == "win32":
+        refresh_autostart_path()
+
+    def toggle_autostart(icon, item):
+        try:
+            set_autostart(not _state["autostart"])
+        except Exception:
+            log("Run at login toggle failed: " + traceback.format_exc())
+        _state["autostart"] = autostart_enabled()
+        icon.update_menu()
 
     def toggle(icon, item):
         _state["enabled"] = not _state["enabled"]
@@ -342,6 +421,8 @@ def run_tray():
         pystray.MenuItem(lambda item: status()[1], None, enabled=False),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(lambda item: "Enable" if not _state["enabled"] else "Disable", toggle),
+        pystray.MenuItem("Run at login", toggle_autostart, checked=lambda item: _state.get("autostart", False),
+                         visible=sys.platform == "win32"),
         pystray.MenuItem("Open log", open_log),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Quit", quit_app),
