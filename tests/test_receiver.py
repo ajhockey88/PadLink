@@ -13,6 +13,7 @@ import threading
 import time
 import types
 import unittest
+import unittest.mock as mock
 import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -181,6 +182,115 @@ class Updater(unittest.TestCase):
         self.assertIn("'C:\\a b\\it''s\\new.exe'", script)
         self.assertIn("Wait-Process -Id 1", script)
         self.assertIn("Start-Process", script)
+
+
+class FirstRunSetup(unittest.TestCase):
+    def setUp(self):
+        self.r = load_receiver()
+
+    def test_script_contents(self):
+        r = self.r
+        both = r.setup_script(r"C:\it's here\ViGEmBusSetup_x64.msi", True)
+        self.assertIn("msiexec.exe", both)
+        self.assertIn("it''s here", both)
+        self.assertIn("netsh advfirewall firewall add rule name=PadLink", both)
+        self.assertIn("localport=26760,5353", both)
+        self.assertIn("remoteip=LocalSubnet", both)  # LAN only, never the internet
+        self.assertNotIn("msiexec", r.setup_script(None, True))
+        self.assertNotIn("netsh", r.setup_script(r"C:\x.msi", False))
+
+    def patch(self, **kw):
+        patches = [mock.patch.object(self.r, name, value) for name, value in kw.items()]
+        for p_ in patches:
+            p_.start()
+            self.addCleanup(p_.stop)
+
+    def test_nothing_to_do_means_no_prompt(self):
+        elevated = mock.Mock()
+        self.patch(driver_installed=lambda: True, firewall_rule_exists=lambda: True, run_elevated=elevated)
+        self.r.ensure_driver()
+        elevated.assert_not_called()
+
+    def test_declined_driver_install_is_an_error_but_declined_firewall_is_not(self):
+        self.patch(driver_installed=lambda: False, firewall_rule_exists=lambda: False,
+                   find_driver_installer=lambda: r"C:\x.msi", run_elevated=lambda script: False)
+        with self.assertRaises(self.r.DriverError):
+            self.r.ensure_driver()
+        self.patch(driver_installed=lambda: True)
+        self.r.ensure_driver()  # firewall only: logged, not fatal
+
+    def test_one_prompt_installs_driver_and_firewall(self):
+        state = {"driver": False, "rule": False, "calls": []}
+
+        def elevated(script):
+            state["calls"].append(script)
+            state["driver"] = state["rule"] = True  # the elevated script ran
+            return True
+
+        self.patch(driver_installed=lambda: state["driver"], firewall_rule_exists=lambda: state["rule"],
+                   find_driver_installer=lambda: r"C:\x.msi", run_elevated=elevated)
+        with mock.patch.object(self.r.time, "sleep"):
+            self.r.ensure_driver()
+        self.assertEqual(len(state["calls"]), 1)
+        self.assertIn("msiexec", state["calls"][0])
+        self.assertIn("netsh", state["calls"][0])
+        self.assertEqual(self.r._state["note"], "")
+
+    def test_wizard_asks_once_and_applies_answers(self):
+        r = self.r
+        r._state["ready"] = True
+        autostart, answers = mock.Mock(), []
+
+        def ask(text, title="PadLink"):
+            answers.append(text)
+            return True
+
+        self.patch(ask_yes_no=ask, set_autostart=autostart, show_pairing_code=lambda: None)
+        r.first_run_wizard()
+        self.assertEqual(len(answers), 2)
+        autostart.assert_called_once_with(True)
+        self.assertTrue(r._state["require_pairing"])
+        self.assertTrue(r.load_settings()["pairing_required"])
+        self.assertTrue(r.load_settings()["first_run_done"])
+        r.first_run_wizard()
+        self.assertEqual(len(answers), 2)  # not asked again
+
+    def test_wizard_respects_no(self):
+        r = self.r
+        r._state["ready"] = True
+        autostart = mock.Mock()
+        self.patch(ask_yes_no=lambda text, title="PadLink": False, set_autostart=autostart)
+        r.first_run_wizard()
+        autostart.assert_not_called()
+        self.assertFalse(r._state["require_pairing"])
+        self.assertTrue(r.load_settings()["first_run_done"])
+
+    def test_source_run_installs_missing_packages(self):
+        r = self.r
+        import importlib.util
+        with mock.patch.object(importlib.util, "find_spec", return_value=None), \
+                mock.patch.object(r.subprocess, "run") as run:
+            r.ensure_requirements()  # no requirements.txt next to the script: install by name
+        cmd = run.call_args[0][0]
+        self.assertEqual(cmd[1:4], ["-m", "pip", "install"])
+        self.assertIn("zeroconf", cmd)
+        with open(os.path.join(r.APP_DIR, "requirements.txt"), "w") as f:
+            f.write("vgamepad\n")
+        with mock.patch.object(importlib.util, "find_spec", return_value=None), \
+                mock.patch.object(r.subprocess, "run") as run:
+            r.ensure_requirements()
+        self.assertIn("-r", run.call_args[0][0])
+        with mock.patch.object(importlib.util, "find_spec", return_value=object()), \
+                mock.patch.object(r.subprocess, "run") as run:
+            r.ensure_requirements()  # everything present: nothing to install
+        run.assert_not_called()
+
+    def test_exe_never_runs_pip(self):
+        r = self.r
+        r.FROZEN = True
+        with mock.patch.object(r.subprocess, "run") as run:
+            r.ensure_requirements()
+        run.assert_not_called()
 
 
 class OverUdp(unittest.TestCase):

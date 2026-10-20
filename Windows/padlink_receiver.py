@@ -73,7 +73,7 @@ def log(msg):
 
 _pad = None
 _state = {"sock": None, "phone": None, "large": 0, "small": 0,
-          "enabled": True, "quit": False, "error": False, "note": "", "update": None, "notified": None, "key": b"", "require_pairing": False, "phone_signed": False, "last_seen": 0.0, "phone_ip": None}
+          "enabled": True, "quit": False, "error": False, "note": "", "update": None, "notified": None, "key": b"", "require_pairing": False, "phone_signed": False, "last_seen": 0.0, "phone_ip": None, "ready": False}
 _started = {"rumble": False, "watch": False}
 _zeroconf = {"zc": None, "addrs": []}
 
@@ -128,27 +128,74 @@ def find_driver_installer():
     return next((c for c in candidates if os.path.exists(c)), None)
 
 
-def ensure_driver():
-    """Install the ViGEmBus driver (one Windows approval prompt) if it is missing."""
-    if driver_installed():
-        return
-    msi = find_driver_installer()
-    if not msi:
-        raise DriverError("ViGEmBus driver missing: install it from github.com/nefarius/ViGEmBus/releases")
-    _state["note"] = "installing the controller driver, approve the Windows prompt"
-    log("Installing ViGEmBus driver from " + msi)
+FIREWALL_RULE = "PadLink"
+
+
+def firewall_rule_exists():
+    if sys.platform != "win32":
+        return True
+    try:
+        return subprocess.run(["netsh", "advfirewall", "firewall", "show", "rule", f"name={FIREWALL_RULE}"],
+                              capture_output=True, creationflags=NO_WINDOW).returncode == 0
+    except Exception:
+        return True  # can't tell: don't nag
+
+
+def setup_script(driver_msi, need_firewall):
+    """PowerShell for the one elevated step. Only what is missing is included."""
+    lines = ["$ErrorActionPreference = 'Continue'"]
+    if driver_msi:
+        msi = driver_msi.replace("'", "''")
+        lines.append(f"Start-Process -FilePath msiexec.exe -ArgumentList '/i','\"{msi}\"','/qb','/norestart' -Wait")
+    if need_firewall:
+        # Same-network devices only (never the internet), on every network profile, no matter where the exe lives.
+        lines.append(f"netsh advfirewall firewall add rule name={FIREWALL_RULE} dir=in action=allow protocol=UDP "
+                     f"localport={PORT},5353 remoteip=LocalSubnet profile=any enable=yes | Out-Null")
+    return "\n".join(lines)
+
+
+def run_elevated(script):
+    """Run PowerShell as administrator (shows the Windows approval prompt). False if declined."""
+    import base64
     import ctypes
-    rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", "msiexec.exe", f'/i "{msi}" /qb /norestart', None, 1)
-    if rc <= 32:
-        raise DriverError("driver install was declined; use Enable to try again")
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode()
+    args = f"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand {encoded}"
+    return ctypes.windll.shell32.ShellExecuteW(None, "runas", "powershell.exe", args, None, 0) > 32
+
+
+def ensure_driver():
+    """First-run setup: the controller driver and the firewall rule, behind one Windows approval prompt."""
+    need_driver = not driver_installed()
+    need_firewall = not firewall_rule_exists()
+    if not need_driver and not need_firewall:
+        return
+    msi = None
+    if need_driver:
+        msi = find_driver_installer()
+        if not msi:
+            raise DriverError("ViGEmBus driver missing: install it from github.com/nefarius/ViGEmBus/releases")
+    _state["note"] = "setting up, approve the Windows prompt"
+    log(f"First-run setup: driver={need_driver} firewall={need_firewall}")
+    if not run_elevated(setup_script(msi, need_firewall)):
+        _state["note"] = ""
+        if need_driver:
+            raise DriverError("setup was declined; use Enable to try again")
+        log("Firewall rule not added (prompt declined); allow UDP 26760 and 5353 manually")
+        return
     deadline = time.monotonic() + 180
-    while not driver_installed():
+    while True:
+        if (not need_driver or driver_installed()) and (not need_firewall or firewall_rule_exists()):
+            break
         if time.monotonic() > deadline:
-            raise DriverError("driver install did not finish; use Enable to try again")
+            if need_driver and not driver_installed():
+                raise DriverError("driver install did not finish; use Enable to try again")
+            log("Firewall rule was not created; allow UDP 26760 and 5353 manually")
+            break
         time.sleep(2)
-    time.sleep(3)
+    if need_driver:
+        time.sleep(3)
     _state["note"] = ""
-    log("ViGEmBus driver installed")
+    log("First-run setup finished")
 
 
 def get_pad():
@@ -296,6 +343,7 @@ def loop(sock):
                 continue
             _state["error"] = False
             _state["note"] = ""
+            _state["ready"] = True
             advertise_start()
             print(f"PadLink listening on UDP {PORT} (virtual Xbox 360 pad created)")
             print("Waiting for the phone...")
@@ -707,6 +755,80 @@ def update_checker(icon):
             time.sleep(5)
 
 
+def ask_yes_no(text, title="PadLink"):
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        return ctypes.windll.user32.MessageBoxW(None, text, title, 0x24) == 6  # Yes/No, question icon
+    except Exception:
+        return False
+
+
+def show_pairing_code():
+    text = (f"Pairing code: {format_code(current_code())}\n\n"
+            "In the PadLink app on your iPhone, type this into the PC section's Pairing code box.")
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(None, text, "PadLink pairing code", 0x40)
+        except Exception:
+            pass
+    else:
+        print(text)
+
+
+def set_pairing_required(on):
+    save_settings(pairing_required=bool(on))
+    _state["require_pairing"] = bool(on)
+
+
+def first_run_wizard():
+    """After setup succeeds, ask the two questions that need a human, once."""
+    if load_settings().get("first_run_done"):
+        return
+    deadline = time.monotonic() + 600
+    while not _state["ready"] and not _state["quit"] and time.monotonic() < deadline:
+        time.sleep(1)
+    if not _state["ready"]:
+        return
+    if not autostart_enabled() and ask_yes_no(
+            "PadLink is set up and running in the system tray (the icon near the clock; click ^ if hidden).\n\n"
+            "Start PadLink automatically when you sign in to Windows? (recommended)"):
+        try:
+            set_autostart(True)
+        except Exception:
+            log("Run at login failed: " + traceback.format_exc())
+    if not _state["require_pairing"] and ask_yes_no(
+            "Require a pairing code, so only your phone can send input to this PC? (recommended)\n\n"
+            "You will type the code into the PadLink app once."):
+        set_pairing_required(True)
+        show_pairing_code()
+    save_settings(first_run_done=True)
+
+
+def ensure_requirements():
+    """Running from source: install any missing packages on first run (the exe already has them)."""
+    if FROZEN:
+        return
+    import importlib
+    import importlib.util
+    needed = {"zeroconf": "zeroconf", "ifaddr": "ifaddr", "pystray": "pystray", "PIL": "pillow", "vgamepad": "vgamepad"}
+    missing = [pkg for mod, pkg in needed.items() if importlib.util.find_spec(mod) is None]
+    if not missing:
+        return
+    req = os.path.join(APP_DIR, "requirements.txt")
+    cmd = [sys.executable, "-m", "pip", "install", "-r", req] if os.path.exists(req) else [sys.executable, "-m", "pip", "install", *missing]
+    print("First run: installing " + ", ".join(missing) + " ...")
+    log("Installing missing packages: " + ", ".join(missing))
+    try:
+        subprocess.run(cmd, check=True, creationflags=NO_WINDOW if sys.platform == "win32" else 0)
+        importlib.invalidate_caches()
+    except Exception:
+        log("Package install failed: " + traceback.format_exc())
+        print("Could not install the required packages automatically. Run: pip install -r requirements.txt")
+
+
 def run_tray():
     import pystray
 
@@ -757,23 +879,13 @@ def run_tray():
         icon.update_menu()
 
     def show_code(icon=None, item=None):
-        text = (f"Pairing code: {format_code(current_code())}\n\n"
-                "In the PadLink app on your iPhone, type this into the PC section's Pairing code box.")
-        if sys.platform == "win32":
-            try:
-                import ctypes
-                ctypes.windll.user32.MessageBoxW(None, text, "PadLink pairing code", 0x40)
-            except Exception:
-                pass
-        else:
-            print(text)
+        show_pairing_code()
 
     def toggle_pairing(icon, item):
-        save_settings(pairing_required=not _state["require_pairing"])
-        _state["require_pairing"] = not _state["require_pairing"]
+        set_pairing_required(not _state["require_pairing"])
         icon.update_menu()
         if _state["require_pairing"]:
-            show_code()
+            show_pairing_code()
 
     def regenerate_code(icon, item):
         save_settings(pairing_code=new_code())
@@ -825,10 +937,12 @@ def run_tray():
 
 def main():
     print("PadLink receiver starting...")
+    ensure_requirements()
     sock = open_socket()
     _state["sock"] = sock
     load_pairing()
     threading.Thread(target=serve, args=(sock,), daemon=True).start()
+    threading.Thread(target=first_run_wizard, daemon=True).start()
     if "--no-tray" not in sys.argv:
         try:
             run_tray()  # blocks until Quit

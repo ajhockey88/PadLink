@@ -18,6 +18,7 @@ struct ContentView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     header
+                    WelcomeCard(connected: link.state == .connected)
                     statusCard
                     pcCard
                     controllerCard

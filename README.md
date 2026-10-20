@@ -31,22 +31,27 @@ This is not a real USB connection: iOS cannot act as a USB device. The PC sees a
 Download both files from the [latest release](https://github.com/ajhockey88/PadLink/releases/latest).
 
 ### PC (Windows 11)
-1. Download `PadLinkReceiver.exe` and double-click it. Nothing else to install.
-2. First run only: it installs the virtual-controller driver (ViGEmBus). Approve the Windows prompt. If it still says the driver is missing afterwards, restart Windows once.
-3. A PadLink icon appears in the system tray (click `^` if hidden) and you hear a controller chime.
-4. Allow it through Windows Firewall when asked (private networks; if your Ethernet shows as Public, allow that too). It uses UDP 26760, plus 5353 for finding the PC.
-5. To start it automatically at every login, right-click the tray icon and tick **Run at login**. This copies the exe to `%LOCALAPPDATA%\PadLink` so you can delete the download.
+1. Download `PadLinkReceiver.exe` and double-click it. That is the only step; it sets itself up.
+2. **On first run it does this for you** (one Windows approval prompt, because it changes system settings):
+   - installs the virtual-controller driver (ViGEmBus), which is bundled inside the exe;
+   - adds a Windows Firewall rule named **PadLink** that allows UDP 26760 (controller data) and 5353 (finding the PC), from devices on your own network only, on any network type (Private, Public, Domain);
+   - then asks two yes/no questions: start PadLink when you sign in to Windows (recommended), and require a pairing code so only your phone can send input (recommended).
+3. A PadLink icon appears in the system tray (click `^` if hidden) and you hear a controller chime. If the driver was just installed and it still reports an error, restart Windows once.
+4. If you said no to starting at login, you can turn it on any time: right-click the tray icon and tick **Run at login**. This copies the exe to `%LOCALAPPDATA%\PadLink` so you can delete the download.
+
+**Port forwarding is not needed, and you should not set it up.** The phone and PC talk over your own network (Wi-Fi, Ethernet or a USB tether), so nothing has to be opened on your router. Forwarding the port would expose your controller input to the internet. PadLink deliberately does not do this (no UPnP, no router changes).
 
 Windows SmartScreen may warn because the exe is not code-signed: choose **More info** then **Run anyway**.
 
 **Updates:** PadLink checks GitHub for a new release about once a day (tray menu > **Check automatically** to turn that off) and pops up a notice. Right-click the tray icon > **Install update vX** to download it, verify its checksum, and restart on the new version; no manual download. **Check for updates** checks right now. The iPhone app is not covered; reinstall its `.ipa` with Sideloadly. (Versions before 0.4.1 have no updater: replace them by hand once.)
 
-Advanced / from source: unzip `PadLinkReceiver.zip`, install Python 3.12+, run `pip install -r requirements.txt` and `python padlink_receiver.py`
-(`--no-tray` for console only). `install_startup.ps1` makes a scheduled task that also restarts it after a crash; the tray toggle detects and can remove that task.
+Advanced / from source: unzip `PadLinkReceiver.zip`, install Python 3.12+ and run `python padlink_receiver.py` (`--no-tray` for console only). On first run it installs any missing Python packages itself (`pip install -r requirements.txt`) and does the same driver and firewall setup as the exe. `install_startup.ps1` makes a scheduled task that also restarts it after a crash; the tray toggle detects and can remove that task.
 
 Give the PC a fixed IP (a DHCP reservation in your router) so the address in the app does not change.
 
 ### iPhone (no Mac needed)
+On first launch the app shows a short welcome card with the steps below; it goes away when you tap **Got it** or once the app connects to a PC. iOS itself asks for Local Network access the first time; tap Allow (apps cannot do that for you).
+
 1. Install [Sideloadly](https://sideloadly.io/) on the PC, plus iTunes and iCloud from Apple's site (not the Microsoft Store versions).
 2. Plug in the iPhone, tap Trust, drag `PadLink.ipa` into Sideloadly, enter your Apple ID and click Start.
 3. On the iPhone: Settings > General > VPN & Device Management > trust your Apple ID. Enable Developer Mode if asked.
@@ -93,7 +98,7 @@ on the router and keep the phone out of Low Power Mode.
   `Stop-Process -Name python, pythonw -Force` if you don't use Python for anything else. The receiver prints what it is doing.
 - **"Driver missing" / startup error mentioning ViGEm:** the exe installs the driver on first run; if you declined the prompt, right-click the tray icon and choose **Enable** to retry, then restart Windows. Manual installer: [ViGEmBus releases](https://github.com/nefarius/ViGEmBus/releases).
 - **No controller in `joy.cpl`:** the receiver creates it at start; look for the chime and the console message.
-- **Latency test shows "No reply":** wrong IP, receiver not running, or the firewall is blocking UDP 26760.
+- **Latency test shows "No reply":** wrong IP, receiver not running, or the firewall rule was not added (you declined the prompt). Quit PadLink from the tray and run it again to retry, or run once as administrator: `netsh advfirewall firewall add rule name=PadLink dir=in action=allow protocol=UDP localport=26760,5353 remoteip=LocalSubnet profile=any`.
 - **Errors are also written to `padlink.log`** next to the exe (tray menu > **Open log**).
 
 ## Limits
