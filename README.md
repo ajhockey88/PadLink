@@ -22,6 +22,8 @@ This is not a real USB connection: iOS cannot act as a USB device. The PC sees a
 - Keeps running when you switch apps or lock the phone, and starts sending as soon as the app opens.
 - Built-in latency test (round trip to the PC) with a live graph.
 - The receiver releases all inputs if the phone goes quiet, so nothing gets stuck.
+- Optional pairing code so only your phone can send input.
+- Stick and trigger dead zones.
 - PC tray icon with live status, Disable / Enable, Run at login, self-update, Open log and Quit.
 
 ## Install
@@ -61,8 +63,20 @@ To measure latency, tap **Test latency** while running. The receiver must be the
 ### Tray icon (PC)
 The receiver lives in the notification area. The badge on the icon shows the state: green = phone connected,
 amber = waiting for the phone, gray = disabled, red = error. Right-click for status, **Disable** / **Enable**
-(Disable removes the virtual controller and stops answering the phone), **Run at login**, **Install update** / **Check for updates**, **Open log** and **Quit**.
+(Disable removes the virtual controller and stops answering the phone), **Pairing**, **Run at login**, **Install update** / **Check for updates**, **Open log** and **Quit**.
 Pass `--no-tray` to run without it.
+
+### Pairing (recommended)
+Without it, anyone on your network could send controller input to the PC. To turn it on: right-click the PC tray icon >
+**Pairing** > **Require pairing code**. A message shows a 12-character code like `K7QD-4FHX-93MP`. Type it into the **Pairing code**
+box in the iPhone app (PC section) once; it is remembered. From then on the PC ignores any packet that is not signed with
+that code, and the app tells you if the code is missing or wrong. **New pairing code...** replaces it (re-enter it on the phone).
+Pairing is off by default so existing setups keep working. It stops other devices from injecting input; it does not encrypt the
+traffic or protect against someone who can capture your network traffic and replay it, so keep the PC on a network you trust.
+
+### Tuning (iPhone)
+The **Tuning** card has dead zone sliders for the sticks and triggers (0-30%). A dead zone ignores small movement near the
+center (stick drift) and rescales the rest so full travel still reaches 100%.
 
 ## Connection options
 | Option | Setup | Typical round trip |

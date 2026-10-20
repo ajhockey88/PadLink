@@ -38,3 +38,12 @@ every 100 ms while non-zero. The app stops vibrating if nothing arrives for 600 
 The receiver advertises a Bonjour/mDNS service `_padlink._udp` on port 26760
 (instance name = PC host name). The app browses for it and connects to the service
 endpoint, so no IP address is needed. Manual IP entry remains as a fallback.
+
+## Pairing (optional signing)
+When a pairing code is set, the phone appends an 8-byte tag to every control packet (24 bytes) and ping (20 bytes):
+`tag = HMAC-SHA256(key, payload)[:8]` where `key = SHA256("padlink-v1:" + CODE)` and `CODE` is the 12 characters of the
+pairing code (A-Z without I, L, O and 2-9, dashes ignored). The PC signs rumble packets (12 bytes) the same way when the phone
+signs. With **Require pairing code** on, the PC drops unsigned or wrongly signed packets and replies (at most once a second)
+with a 3-byte notice: u16 magic `0x5041` ("PA"), u8 `1` = pairing code needed. Unsigned packets keep their original lengths,
+so old and new versions interoperate when pairing is off. This is authentication, not encryption: replays are limited only by the
+sequence number.

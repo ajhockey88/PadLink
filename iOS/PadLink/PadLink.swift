@@ -1,4 +1,5 @@
 import AVFoundation
+import CryptoKit
 import CoreHaptics
 import Foundation
 import GameController
@@ -11,7 +12,7 @@ struct DiscoveredPC: Identifiable, Hashable {
 }
 
 enum LinkState {
-    case stopped, searching, connecting, connected, reconnecting
+    case stopped, searching, connecting, connected, reconnecting, needsPairing
 
     var text: String {
         switch self {
@@ -20,6 +21,7 @@ enum LinkState {
         case .connecting: return "Connecting…"
         case .connected: return "Connected"
         case .reconnecting: return "Reconnecting…"
+        case .needsPairing: return "Pairing code needed"
         }
     }
 }
@@ -77,6 +79,13 @@ private final class Motor {
     }
 }
 
+struct Tuning {
+    var swapAB: Bool
+    var swapXY: Bool
+    var stick: Float    // radial dead zone, 0...0.3
+    var trigger: Float  // trigger dead zone, 0...0.3
+}
+
 /// Reads wired controllers via GameController, streams them to the PC over UDP, and relays rumble back.
 final class PadLink: ObservableObject {
     static let port: NWEndpoint.Port = 26760
@@ -111,14 +120,69 @@ final class PadLink: ObservableObject {
         }
     }
 
-    // Swap face buttons (e.g. Nintendo-style layout). Read on the network queue, written from the UI.
+    // Swap face buttons and stick/trigger tuning. Read on the network queue, written from the UI.
     @Published var swapAB = UserDefaults.standard.bool(forKey: "swapAB") {
-        didSet { UserDefaults.standard.set(swapAB, forKey: "swapAB"); layout = (swapAB, swapXY) }
+        didSet { UserDefaults.standard.set(swapAB, forKey: "swapAB"); refreshTuning() }
     }
     @Published var swapXY = UserDefaults.standard.bool(forKey: "swapXY") {
-        didSet { UserDefaults.standard.set(swapXY, forKey: "swapXY"); layout = (swapAB, swapXY) }
+        didSet { UserDefaults.standard.set(swapXY, forKey: "swapXY"); refreshTuning() }
     }
-    private var layout = (UserDefaults.standard.bool(forKey: "swapAB"), UserDefaults.standard.bool(forKey: "swapXY"))
+    @Published var stickDeadZone = UserDefaults.standard.double(forKey: "stickDZ") {
+        didSet { UserDefaults.standard.set(stickDeadZone, forKey: "stickDZ"); refreshTuning() }
+    }
+    @Published var triggerDeadZone = UserDefaults.standard.double(forKey: "trigDZ") {
+        didSet { UserDefaults.standard.set(triggerDeadZone, forKey: "trigDZ"); refreshTuning() }
+    }
+    private var tuning = Tuning(swapAB: UserDefaults.standard.bool(forKey: "swapAB"),
+                                swapXY: UserDefaults.standard.bool(forKey: "swapXY"),
+                                stick: Float(UserDefaults.standard.double(forKey: "stickDZ")),
+                                trigger: Float(UserDefaults.standard.double(forKey: "trigDZ")))
+
+    private func refreshTuning() {
+        tuning = Tuning(swapAB: swapAB, swapXY: swapXY, stick: Float(stickDeadZone), trigger: Float(triggerDeadZone))
+    }
+
+    func resetTuning() {
+        stickDeadZone = 0
+        triggerDeadZone = 0
+    }
+
+    // Pairing: the code typed in the app derives a key; every packet is signed with it when set.
+    @Published var pairingCode = UserDefaults.standard.string(forKey: "pairingCode") ?? "" {
+        didSet {
+            UserDefaults.standard.set(pairingCode, forKey: "pairingCode")
+            let key = Self.makeKey(pairingCode)
+            queue.async { self.key = key; self.lastPairingNeeded = 0 }
+        }
+    }
+    private var key: SymmetricKey? = PadLink.makeKey(UserDefaults.standard.string(forKey: "pairingCode") ?? "")
+    private var lastPairingNeeded: UInt64 = 0
+
+    static let codeAlphabet = Set("ABCDEFGHJKMNPQRSTUVWXYZ23456789")
+
+    /// 12 valid characters (dashes and spaces ignored) become the signing key; fewer means "no code".
+    static func makeKey(_ code: String) -> SymmetricKey? {
+        let clean = code.uppercased().filter { codeAlphabet.contains($0) }
+        guard clean.count == 12 else { return nil }
+        let digest = SHA256.hash(data: Data(("padlink-v1:" + clean).utf8))
+        return SymmetricKey(data: Data(digest))
+    }
+
+    private static func tag(_ payload: Data, key: SymmetricKey) -> Data {
+        Data(HMAC<SHA256>.authenticationCode(for: payload, using: key).prefix(8))
+    }
+
+    private func signed(_ payload: Data) -> Data {
+        guard let key else { return payload }
+        return payload + Self.tag(payload, key: key)
+    }
+
+    /// True if the datagram has the length for its type and (when we have a code) a valid tag.
+    private func authentic(_ data: Data, payload: Int) -> Bool {
+        guard let key else { return data.count == payload }
+        guard data.count == payload + 8 else { return false }
+        return Self.tag(data.prefix(payload), key: key) == data.suffix(8)
+    }
 
     // Network state: only touched on `queue`.
     private let queue = DispatchQueue(label: "padlink.net", qos: .userInteractive)
@@ -348,6 +412,8 @@ final class PadLink: ObservableObject {
 
         if lastReply != 0, now - lastReply < 3 * Self.second {
             setState(.connected)
+        } else if lastPairingNeeded != 0, now - lastPairingNeeded < 3 * Self.second {
+            setState(.needsPairing)
         } else if connection == nil {
             setState(.searching)
             // Old receiver without discovery, or no PC found: fall back to the typed IP.
@@ -372,28 +438,34 @@ final class PadLink: ObservableObject {
         func put<T: FixedWidthInteger>(_ v: T) { withUnsafeBytes(of: v.littleEndian) { d.append(contentsOf: $0) } }
         put(UInt16(0x5049)); put(pingSeq); put(now)
         pingSeq &+= 1
-        conn.send(content: d, completion: .idempotent)
+        conn.send(content: signed(d), completion: .idempotent)
     }
 
     private func receive(_ conn: NWConnection) {
         conn.receiveMessage { [weak self, weak conn] data, _, _, error in
             guard let self, let conn, self.connection === conn else { return }
-            if let data, data.count == 12 {
-                let sent = data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 4, as: UInt64.self) }
-                let now = DispatchTime.now().uptimeNanoseconds
-                let t0 = UInt64(littleEndian: sent)
-                if now >= t0 {
-                    self.lastReply = now
-                    if self.testingQ {
-                        self.lastSampleReply = now
-                        self.publish(Double(now - t0) / 1_000_000)
+            if let data, data.count >= 2 {
+                let magic = data.withUnsafeBytes { UInt16(littleEndian: $0.loadUnaligned(fromByteOffset: 0, as: UInt16.self)) }
+                switch magic {
+                case 0x5049 where self.authentic(data, payload: 12):  // ping echo
+                    let sent = data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 4, as: UInt64.self) }
+                    let now = DispatchTime.now().uptimeNanoseconds
+                    let t0 = UInt64(littleEndian: sent)
+                    if now >= t0 {
+                        self.lastReply = now
+                        self.lastPairingNeeded = 0
+                        if self.testingQ {
+                            self.lastSampleReply = now
+                            self.publish(Double(now - t0) / 1_000_000)
+                        }
                     }
-                }
-            } else if let data, data.count == 4 {
-                let magic = data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 0, as: UInt16.self) }
-                if UInt16(littleEndian: magic) == 0x5052 {
+                case 0x5052 where self.authentic(data, payload: 4):  // rumble
                     let large = data[2], small = data[3]
                     DispatchQueue.main.async { self.applyRumble(large, small) }
+                case 0x5041 where data.count == 3:  // the PC wants a (correct) pairing code
+                    self.lastPairingNeeded = DispatchTime.now().uptimeNanoseconds
+                default:
+                    break
                 }
             }
             if error == nil { self.receive(conn) }
@@ -415,7 +487,7 @@ final class PadLink: ObservableObject {
 
     private func sendNow() {
         guard let conn = connection, !pads.isEmpty else { return }
-        let data = Self.encode(pads, seq: seq, swapAB: layout.0, swapXY: layout.1)
+        let data = signed(Self.encode(pads, seq: seq, tuning: tuning))
         seq &+= 1
         conn.send(content: data, completion: .idempotent)
         DispatchQueue.main.async { self.packetsSent += 1 }
@@ -453,7 +525,8 @@ final class PadLink: ObservableObject {
 
     // MARK: Encoding
 
-    static func encode(_ pads: [GCExtendedGamepad], seq: UInt16, swapAB: Bool, swapXY: Bool) -> Data {
+    static func encode(_ pads: [GCExtendedGamepad], seq: UInt16, tuning: Tuning) -> Data {
+        let swapAB = tuning.swapAB, swapXY = tuning.swapXY
         var b: UInt16 = 0
         func set(_ on: Bool, _ mask: UInt16) { if on { b |= mask } }
         var lt: Float = 0, rt: Float = 0
@@ -477,8 +550,22 @@ final class PadLink: ObservableObject {
             rs = larger(rs, p.rightThumbstick.xAxis.value, p.rightThumbstick.yAxis.value)
         }
 
+        // Dead zones: ignore small movement, then rescale so full travel still reaches 100%.
+        func shape(_ v: (Float, Float)) -> (Float, Float) {
+            let dz = tuning.stick
+            let m = (v.0 * v.0 + v.1 * v.1).squareRoot()
+            guard dz > 0, m > 0 else { return v }
+            guard m > dz else { return (0, 0) }
+            let k = min(1, (m - dz) / (1 - dz)) / m
+            return (v.0 * k, v.1 * k)
+        }
         func axis(_ v: Float) -> Int16 { Int16(max(-1, min(1, v)) * 32767) }
-        func trig(_ v: Float) -> UInt8 { UInt8(max(0, min(1, v)) * 255) }
+        func trig(_ v: Float) -> UInt8 {
+            let dz = tuning.trigger
+            let t = dz > 0 ? (v <= dz ? 0 : (v - dz) / (1 - dz)) : v
+            return UInt8(max(0, min(1, t)) * 255)
+        }
+        ls = shape(ls); rs = shape(rs)
 
         var d = Data(capacity: 16)
         func put<T: FixedWidthInteger>(_ v: T) { withUnsafeBytes(of: v.littleEndian) { d.append(contentsOf: $0) } }

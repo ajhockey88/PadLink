@@ -5,9 +5,11 @@ Requires ViGEmBus (https://github.com/nefarius/ViGEmBus) and `pip install -r req
 """
 import gc
 import hashlib
+import hmac
 import json
 import os
 import re
+import secrets
 import shutil
 import socket
 import struct
@@ -28,6 +30,9 @@ PORT = 26760
 MAGIC = 0x504C
 PING_MAGIC = 0x5049
 RUMBLE_MAGIC = 0x5052
+PAIR_MAGIC = 0x5041  # "PA": receiver tells the phone a pairing code is needed
+TAG_LEN = 8  # signed packets carry the first 8 bytes of HMAC-SHA256 after the payload
+CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # no 0/O, 1/I/L
 SERVICE_TYPE = "_padlink._udp.local."
 PACKET = struct.Struct("<HHHBBhhhh")
 PING_SIZE = 12  # echoed back untouched so the app can measure round-trip time
@@ -68,7 +73,7 @@ def log(msg):
 
 _pad = None
 _state = {"sock": None, "phone": None, "large": 0, "small": 0,
-          "enabled": True, "quit": False, "error": False, "note": "", "update": None, "notified": None, "last_seen": 0.0, "phone_ip": None}
+          "enabled": True, "quit": False, "error": False, "note": "", "update": None, "notified": None, "key": b"", "require_pairing": False, "phone_signed": False, "last_seen": 0.0, "phone_ip": None}
 _started = {"rumble": False, "watch": False}
 _zeroconf = {"zc": None, "addrs": []}
 
@@ -79,7 +84,10 @@ def send_rumble():
     if sock is None or phone is None:
         return
     try:
-        sock.sendto(struct.pack("<HBB", RUMBLE_MAGIC, _state["large"], _state["small"]), phone)
+        payload = struct.pack("<HBB", RUMBLE_MAGIC, _state["large"], _state["small"])
+        if _state["phone_signed"]:
+            payload += tag_for(_state["key"], payload)
+        sock.sendto(payload, phone)
     except OSError:
         pass
 
@@ -311,21 +319,24 @@ def loop(sock):
             data = None
 
         if pad is not None and data:
-            if len(data) == PING_SIZE and struct.unpack_from("<H", data)[0] == PING_MAGIC:
+            kind, payload, tag = parse_datagram(data)
+            signed = kind is not None and is_signed(payload, tag)
+            if kind is not None and _state["require_pairing"] and not signed:
+                tell_phone_pairing_needed(sock, addr)  # unpaired phones are ignored
+                kind = None
+            if kind is not None:
                 _state["phone"] = addr
                 _state["phone_ip"] = addr[0]
+                _state["phone_signed"] = signed
                 _state["last_seen"] = time.monotonic()
+            if kind == "ping":
                 try:
                     sock.sendto(data, addr)
                 except OSError:
                     pass
-            elif len(data) == PACKET.size:
-                magic, seq, buttons, lt, rt, lx, ly, rx, ry = PACKET.unpack(data)
-                if magic == MAGIC:
-                    _state["phone"] = addr
-                    _state["phone_ip"] = addr[0]
-                    _state["last_seen"] = time.monotonic()
-                if magic == MAGIC and newer(seq, last):
+            elif kind == "input":
+                magic, seq, buttons, lt, rt, lx, ly, rx, ry = PACKET.unpack(payload)
+                if newer(seq, last):
                     if idle or last is None:
                         print(f"Phone connected: {addr[0]}")
                     last = seq
@@ -489,6 +500,75 @@ def refresh_autostart_path():
             if winreg.QueryValueEx(key, RUN_NAME)[0] != autostart_command():
                 winreg.SetValueEx(key, RUN_NAME, 0, winreg.REG_SZ, autostart_command())
     except Exception:
+        pass
+
+
+# ------------------------------------------------------------------ pairing
+
+def new_code():
+    return "".join(secrets.choice(CODE_ALPHABET) for _ in range(12))
+
+
+def format_code(code):
+    return "-".join(code[i:i + 4] for i in range(0, len(code), 4))
+
+
+def normalize_code(text):
+    return "".join(ch for ch in (text or "").upper() if ch in CODE_ALPHABET)
+
+
+def key_for(code):
+    return hashlib.sha256(b"padlink-v1:" + normalize_code(code).encode()).digest()
+
+
+def tag_for(key, payload):
+    return hmac.new(key, payload, hashlib.sha256).digest()[:TAG_LEN]
+
+
+def load_pairing():
+    """Read (or create) the pairing code and whether it is required."""
+    settings = load_settings()
+    code = normalize_code(settings.get("pairing_code", ""))
+    if len(code) != 12:
+        code = new_code()
+        save_settings(pairing_code=code)
+    _state["key"] = key_for(code)
+    _state["require_pairing"] = bool(settings.get("pairing_required", False))
+    return code
+
+
+def current_code():
+    return normalize_code(load_settings().get("pairing_code", ""))
+
+
+def parse_datagram(data):
+    """Split a datagram into (kind, payload, tag); kind is 'ping', 'input' or None."""
+    if len(data) < 2:
+        return None, b"", b""
+    magic = struct.unpack_from("<H", data)[0]
+    if magic == PING_MAGIC and len(data) in (PING_SIZE, PING_SIZE + TAG_LEN):
+        return "ping", data[:PING_SIZE], data[PING_SIZE:]
+    if magic == MAGIC and len(data) in (PACKET.size, PACKET.size + TAG_LEN):
+        return "input", data[:PACKET.size], data[PACKET.size:]
+    return None, b"", b""
+
+
+def is_signed(payload, tag):
+    return len(tag) == TAG_LEN and hmac.compare_digest(tag, tag_for(_state["key"], payload))
+
+
+_pair_notice = {}
+
+
+def tell_phone_pairing_needed(sock, addr):
+    """Reply (at most once a second per phone) so the app can say the code is missing or wrong."""
+    now = time.monotonic()
+    if now - _pair_notice.get(addr[0], 0.0) < 1.0:
+        return
+    _pair_notice[addr[0]] = now
+    try:
+        sock.sendto(struct.pack("<HB", PAIR_MAGIC, 1), addr)
+    except OSError:
         pass
 
 
@@ -676,6 +756,30 @@ def run_tray():
         save_settings(auto_update_check=not load_settings().get("auto_update_check", True))
         icon.update_menu()
 
+    def show_code(icon=None, item=None):
+        text = (f"Pairing code: {format_code(current_code())}\n\n"
+                "In the PadLink app on your iPhone, type this into the PC section's Pairing code box.")
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                ctypes.windll.user32.MessageBoxW(None, text, "PadLink pairing code", 0x40)
+            except Exception:
+                pass
+        else:
+            print(text)
+
+    def toggle_pairing(icon, item):
+        save_settings(pairing_required=not _state["require_pairing"])
+        _state["require_pairing"] = not _state["require_pairing"]
+        icon.update_menu()
+        if _state["require_pairing"]:
+            show_code()
+
+    def regenerate_code(icon, item):
+        save_settings(pairing_code=new_code())
+        load_pairing()
+        show_code()
+
     def do_update(icon, item):
         threading.Thread(target=install_update, args=(icon,), daemon=True).start()
 
@@ -685,6 +789,11 @@ def run_tray():
         pystray.MenuItem(lambda item: "Enable" if not _state["enabled"] else "Disable", toggle),
         pystray.MenuItem("Run at login", toggle_autostart, checked=lambda item: _state.get("autostart", False),
                          visible=sys.platform == "win32"),
+        pystray.MenuItem("Pairing", pystray.Menu(
+            pystray.MenuItem("Require pairing code", toggle_pairing, checked=lambda item: _state["require_pairing"]),
+            pystray.MenuItem("Show pairing code...", show_code),
+            pystray.MenuItem("New pairing code...", regenerate_code),
+        )),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(lambda item: f"Install update {_state['update']['tag']}" if _state["update"] else "",
                          do_update, visible=lambda item: bool(_state["update"])),
@@ -718,6 +827,7 @@ def main():
     print("PadLink receiver starting...")
     sock = open_socket()
     _state["sock"] = sock
+    load_pairing()
     threading.Thread(target=serve, args=(sock,), daemon=True).start()
     if "--no-tray" not in sys.argv:
         try:

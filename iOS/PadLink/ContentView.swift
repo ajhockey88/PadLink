@@ -8,6 +8,7 @@ struct ContentView: View {
         case .connected: return Theme.mint
         case .stopped: return Theme.muted
         case .searching, .connecting, .reconnecting: return Theme.amber
+        case .needsPairing: return Theme.red
         }
     }
 
@@ -20,6 +21,7 @@ struct ContentView: View {
                     statusCard
                     pcCard
                     controllerCard
+                    tuningCard
                     actions
                     if link.testing { LatencyView(rtt: link.rtt, history: link.history) }
                     Text("\(link.packetsSent) packets sent")
@@ -83,6 +85,24 @@ struct ContentView: View {
                     .padding(12)
                     .background(Theme.bg, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
+            pairingField
+        }
+    }
+
+    private var pairingField: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            TextField("Pairing code (only if the PC asks)", text: $link.pairingCode)
+                .textInputAutocapitalization(.characters)
+                .autocorrectionDisabled()
+                .padding(12)
+                .background(Theme.bg, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            if link.state == .needsPairing {
+                Text(link.pairingCode.isEmpty
+                     ? "This PC needs a pairing code. Right-click PadLink in the PC tray > Pairing > Show pairing code."
+                     : "That code does not match this PC. Check it in the PC tray > Pairing > Show pairing code.")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.red)
+            }
         }
     }
 
@@ -126,6 +146,31 @@ struct ContentView: View {
             Divider().overlay(Theme.line)
             Toggle("Swap A and B", isOn: $link.swapAB)
             Toggle("Swap X and Y", isOn: $link.swapXY)
+        }
+    }
+
+    private var tuningCard: some View {
+        Card(title: "Tuning") {
+            slider("Stick dead zone", value: $link.stickDeadZone)
+            slider("Trigger dead zone", value: $link.triggerDeadZone)
+            if link.stickDeadZone > 0 || link.triggerDeadZone > 0 {
+                Button("Reset to 0%") { link.resetTuning() }
+                    .font(.footnote)
+            }
+        }
+    }
+
+    private func slider(_ title: String, value: Binding<Double>) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text("\(Int((value.wrappedValue * 100).rounded()))%")
+                    .foregroundStyle(Theme.muted)
+                    .monospacedDigit()
+            }
+            Slider(value: value, in: 0...0.3, step: 0.01)
+                .accessibilityLabel(title)
         }
     }
 
