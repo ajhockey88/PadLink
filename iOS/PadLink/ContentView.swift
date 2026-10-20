@@ -24,6 +24,7 @@ struct ContentView: View {
                     tuningCard
                     actions
                     if link.testing { LatencyView(rtt: link.rtt, history: link.history) }
+                    BenchmarkView(link: link)
                     Text("\(link.packetsSent) packets sent")
                         .font(.footnote)
                         .foregroundStyle(Theme.muted)
@@ -183,6 +184,10 @@ struct ContentView: View {
                     link.testing ? link.stopTest() : link.startTest()
                 }
                 .buttonStyle(PrimaryButtonStyle(filled: false))
+                Button(link.benchmark.isRunning ? "Benchmarking…" : "Run benchmark") { link.startBenchmark() }
+                    .buttonStyle(PrimaryButtonStyle(filled: false))
+                    .disabled(link.benchmark.isRunning || link.state != .connected)
+                    .opacity(link.state == .connected ? 1 : 0.5)
             } else {
                 Button("Start") { link.start() }
                     .buttonStyle(PrimaryButtonStyle())

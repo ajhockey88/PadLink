@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 env:
-  RELEASE_TAG: v0.5.0
+  RELEASE_TAG: v0.5.1
 
 jobs:
   test:

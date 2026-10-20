@@ -104,6 +104,9 @@ final class PadLink: ObservableObject {
 
     // Latency test (round trip to the PC receiver), measured ~5x per second while testing.
     @Published var testing = false
+    @Published var benchmark: BenchmarkState = .idle
+    @Published var lastBenchmark: BenchmarkResult? = PadLink.loadBenchmark()
+    @Published var previousBenchmark: BenchmarkResult?
     @Published var rtt: Double?               // latest, milliseconds
     @Published var history: [Double] = []     // recent samples, -1 = lost
 
@@ -200,6 +203,14 @@ final class PadLink: ObservableObject {
     private var lastReconnect: UInt64 = 0
     private var searchStarted: UInt64 = 0
     private var testingQ = false
+    private var benchTimer: DispatchSourceTimer?
+    private var benchRunning = false
+    private var benchTicks = 0
+    private var benchSent = 0
+    private var benchSeqs = Set<UInt16>()
+    private var benchRTTs: [Double] = []
+    private static let benchPings = 200       // one every 50 ms, about 10 seconds
+    private static let benchGraceTicks = 12   // wait 0.6 s for the last replies
 
     // Controller + rumble state: main thread.
     private var attached: [GCController] = []
@@ -304,6 +315,7 @@ final class PadLink: ObservableObject {
 
     func stop() {
         stopTest()
+        cancelBenchmark()
         running = false
         state = .stopped
         connectedPC = nil
@@ -338,6 +350,69 @@ final class PadLink: ObservableObject {
         testing = false
         rtt = nil; history = []
         queue.async { self.testingQ = false }
+    }
+
+    // MARK: Benchmark
+
+    private static func loadBenchmark() -> BenchmarkResult? {
+        guard let data = UserDefaults.standard.data(forKey: "lastBenchmark") else { return nil }
+        return try? JSONDecoder().decode(BenchmarkResult.self, from: data)
+    }
+
+    /// Sends 200 signed pings, 50 ms apart, and summarizes the replies.
+    func startBenchmark() {
+        guard running, state == .connected, !benchmark.isRunning else {
+            if !benchmark.isRunning { benchmark = .failed("Connect to a PC first, then run the benchmark.") }
+            return
+        }
+        benchmark = .running(0)
+        queue.async { [self] in
+            benchRTTs = []; benchSeqs = []; benchSent = 0; benchTicks = 0; benchRunning = true
+            benchTimer?.cancel()
+            let t = DispatchSource.makeTimerSource(queue: queue)
+            t.schedule(deadline: .now() + 0.2, repeating: 0.05)
+            t.setEventHandler { [weak self] in self?.benchTick() }
+            t.resume()
+            benchTimer = t
+        }
+    }
+
+    func cancelBenchmark() {
+        if benchmark.isRunning { benchmark = .idle }
+        queue.async { [self] in
+            benchRunning = false
+            benchTimer?.cancel(); benchTimer = nil
+        }
+    }
+
+    private func benchTick() {
+        guard benchRunning else { return }
+        benchTicks += 1
+        if benchTicks <= Self.benchPings, let seq = sendPing(DispatchTime.now().uptimeNanoseconds) {
+            benchSeqs.insert(seq)
+            benchSent += 1
+        }
+        if benchTicks % 10 == 0 {
+            let progress = min(1, Double(benchTicks) / Double(Self.benchPings + Self.benchGraceTicks))
+            DispatchQueue.main.async { if self.benchmark.isRunning { self.benchmark = .running(progress) } }
+        }
+        guard benchTicks >= Self.benchPings + Self.benchGraceTicks else { return }
+
+        benchRunning = false
+        benchTimer?.cancel(); benchTimer = nil
+        let sent = benchSent, rtts = benchRTTs
+        DispatchQueue.main.async {
+            guard self.benchmark.isRunning else { return }  // cancelled meanwhile
+            if sent == 0 || rtts.isEmpty {
+                self.benchmark = .failed(sent == 0 ? "Not connected to a PC." : "The PC did not answer any pings. Check the connection and the pairing code.")
+                return
+            }
+            let result = BenchmarkResult(rtts: rtts, sent: sent)
+            self.previousBenchmark = self.lastBenchmark
+            self.lastBenchmark = result
+            if let data = try? JSONEncoder().encode(result) { UserDefaults.standard.set(data, forKey: "lastBenchmark") }
+            self.benchmark = .done(result)
+        }
     }
 
     // MARK: Connection management (queue)
@@ -432,13 +507,16 @@ final class PadLink: ObservableObject {
 
     // MARK: Packets (queue)
 
-    private func sendPing(_ now: UInt64) {
-        guard let conn = connection else { return }
+    @discardableResult
+    private func sendPing(_ now: UInt64) -> UInt16? {
+        guard let conn = connection else { return nil }
+        let used = pingSeq
         var d = Data(capacity: 12)
         func put<T: FixedWidthInteger>(_ v: T) { withUnsafeBytes(of: v.littleEndian) { d.append(contentsOf: $0) } }
-        put(UInt16(0x5049)); put(pingSeq); put(now)
+        put(UInt16(0x5049)); put(used); put(now)
         pingSeq &+= 1
         conn.send(content: signed(d), completion: .idempotent)
+        return used
     }
 
     private func receive(_ conn: NWConnection) {
@@ -454,6 +532,10 @@ final class PadLink: ObservableObject {
                     if now >= t0 {
                         self.lastReply = now
                         self.lastPairingNeeded = 0
+                        let echoSeq = data.withUnsafeBytes { UInt16(littleEndian: $0.loadUnaligned(fromByteOffset: 2, as: UInt16.self)) }
+                        if self.benchRunning, self.benchSeqs.remove(echoSeq) != nil {
+                            self.benchRTTs.append(Double(now - t0) / 1_000_000)
+                        }
                         if self.testingQ {
                             self.lastSampleReply = now
                             self.publish(Double(now - t0) / 1_000_000)
