@@ -22,6 +22,7 @@ This is not a real USB connection: iOS cannot act as a USB device. The PC sees a
 - Keeps running when you switch apps or lock the phone, and starts sending as soon as the app opens.
 - Built-in latency test (round trip to the PC) with a live graph.
 - The receiver releases all inputs if the phone goes quiet, so nothing gets stuck.
+- PC tray icon with live status, Disable / Enable, Open log and Quit.
 
 ## Install
 
@@ -32,7 +33,7 @@ Download both files from the [latest release](https://github.com/ajhockey88/PadL
 2. Install the [ViGEmBus driver](https://github.com/nefarius/ViGEmBus/releases) and reboot if asked.
 3. Unzip `PadLinkReceiver.zip` to a permanent folder, e.g. `C:\PadLink`.
 4. In that folder run `pip install -r requirements.txt`.
-5. Run `python padlink_receiver.py`. You should see "PadLink listening on UDP 26760" and hear a controller chime.
+5. Run `python padlink_receiver.py`. A PadLink icon appears in the system tray, you hear a controller chime, and the console shows "PadLink listening on UDP 26760".
 6. Allow Python through Windows Firewall for UDP 26760 (private networks; if your Ethernet shows as Public, allow that too).
 7. Optional, to start it hidden at every login: `powershell -ExecutionPolicy Bypass -File install_startup.ps1`.
    Stop it with `Stop-ScheduledTask PadLinkReceiver`, remove it with `Unregister-ScheduledTask PadLinkReceiver`.
@@ -53,6 +54,12 @@ Give the PC a fixed IP (a DHCP reservation in your router) so the address in the
 
 To measure latency, tap **Test latency** while running. The receiver must be the current version.
 
+### Tray icon (PC)
+The receiver lives in the notification area. The badge on the icon shows the state: green = phone connected,
+amber = waiting for the phone, gray = disabled, red = error. Right-click for status, **Disable** / **Enable**
+(Disable removes the virtual controller and stops answering the phone), **Open log** and **Quit**.
+Pass `--no-tray` to run without it.
+
 ## Connection options
 | Option | Setup | Typical round trip |
 |---|---|---|
@@ -64,7 +71,7 @@ Numbers are rough; use the latency test on your own setup. If it is hit-or-miss,
 on the router and keep the phone out of Low Power Mode.
 
 ## Troubleshooting
-- **Nothing happens when I run the receiver:** another copy may already own the port. Close old windows, or
+- **Nothing happens when I run the receiver:** another copy may already own the port. Look for its tray icon and use Quit, or
   `Stop-Process -Name python, pythonw -Force` if you don't use Python for anything else. The receiver prints what it is doing.
 - **Startup error mentioning ViGEm:** install the ViGEmBus driver and reboot.
 - **No controller in `joy.cpl`:** the receiver creates it at start; look for the chime and the console message.

@@ -1,7 +1,9 @@
 """PadLink receiver: turns UDP controller packets into a virtual Xbox 360 pad.
 
+Runs with a system tray icon (status, Disable/Enable, Quit). Use `--no-tray` for console only.
 Requires ViGEmBus (https://github.com/nefarius/ViGEmBus) and `pip install -r requirements.txt`.
 """
+import gc
 import os
 import socket
 import struct
@@ -36,8 +38,10 @@ def log(msg):
 
 
 _pad = None
-_state = {"sock": None, "phone": None, "large": 0, "small": 0}
-_started = {"rumble": False, "advertise": False}
+_state = {"sock": None, "phone": None, "large": 0, "small": 0,
+          "enabled": True, "quit": False, "error": False, "last_seen": 0.0, "phone_ip": None}
+_started = {"rumble": False, "watch": False}
+_zeroconf = {"zc": None, "addrs": []}
 
 
 def send_rumble():
@@ -79,60 +83,86 @@ def get_pad():
     return _pad
 
 
-def advertise():
+def destroy_pad():
+    """Remove the virtual controller from Windows (used by Disable)."""
+    global _pad
+    pad, _pad = _pad, None
+    if pad is not None:
+        try:
+            pad.unregister_notification()
+        except Exception:
+            pass
+        del pad
+        gc.collect()
+
+
+def _addresses():
+    import ifaddr
+    out = []
+    for adapter in ifaddr.get_adapters():
+        for ip in adapter.ips:
+            if ip.is_IPv4 and not ip.ip.startswith(("127.", "169.254.")):
+                out.append(socket.inet_aton(ip.ip))
+    return sorted(out)
+
+
+def _service_info(addrs):
+    from zeroconf import ServiceInfo
+    host = socket.gethostname().split(".")[0]
+    return ServiceInfo(SERVICE_TYPE, f"{host}.{SERVICE_TYPE}", addresses=addrs,
+                       port=PORT, server=f"{host}.local.")
+
+
+def advertise_start():
     """Announce this receiver on the local network (Bonjour/mDNS) so the app can find it."""
-    if _started["advertise"]:
+    if _zeroconf["zc"] is not None:
         return
-    _started["advertise"] = True
     try:
-        import ifaddr
-        from zeroconf import IPVersion, ServiceInfo, Zeroconf
+        from zeroconf import IPVersion, Zeroconf
+        zc = Zeroconf(ip_version=IPVersion.V4Only)
+        addrs = _addresses()
+        zc.register_service(_service_info(addrs))
     except ImportError:
         print("Auto-discovery is off (run: pip install -r requirements.txt). Enter the IP in the app instead.")
         return
-
-    def addresses():
-        out = []
-        for adapter in ifaddr.get_adapters():
-            for ip in adapter.ips:
-                if ip.is_IPv4 and not ip.ip.startswith(("127.", "169.254.")):
-                    out.append(socket.inet_aton(ip.ip))
-        return sorted(out)
-
-    host = socket.gethostname().split(".")[0]
-
-    def make(addrs):
-        return ServiceInfo(SERVICE_TYPE, f"{host}.{SERVICE_TYPE}", addresses=addrs,
-                           port=PORT, server=f"{host}.local.")
-
-    try:
-        zc = Zeroconf(ip_version=IPVersion.V4Only)
-        addrs = addresses()
-        zc.register_service(make(addrs))
     except Exception:
         log("Auto-discovery failed: " + traceback.format_exc())
         print("Auto-discovery could not start; enter the IP in the app instead.")
         return
-    print(f"Auto-discovery on: the app will find this PC as '{host}'.")
-
-    def watch():
-        # Re-announce if the PC's addresses change (cable plugged in, DHCP renewal...).
-        nonlocal addrs
-        while True:
-            time.sleep(15)
-            try:
-                now = addresses()
-                if now != addrs:
-                    addrs = now
-                    zc.update_service(make(now))
-            except Exception:
-                pass
-
-    threading.Thread(target=watch, daemon=True).start()
+    _zeroconf["zc"], _zeroconf["addrs"] = zc, addrs
+    print(f"Auto-discovery on: the app will find this PC as '{socket.gethostname().split('.')[0]}'.")
+    if not _started["watch"]:
+        _started["watch"] = True
+        threading.Thread(target=_watch_addresses, daemon=True).start()
 
 
-def main():
-    print("PadLink receiver starting...")
+def advertise_stop():
+    zc, _zeroconf["zc"] = _zeroconf["zc"], None
+    if zc is not None:
+        try:
+            zc.unregister_all_services()
+            zc.close()
+        except Exception:
+            pass
+
+
+def _watch_addresses():
+    # Re-announce if the PC's addresses change (cable plugged in, DHCP renewal...).
+    while not _state["quit"]:
+        time.sleep(15)
+        zc = _zeroconf["zc"]
+        if zc is None:
+            continue
+        try:
+            now = _addresses()
+            if now != _zeroconf["addrs"]:
+                _zeroconf["addrs"] = now
+                zc.update_service(_service_info(now))
+        except Exception:
+            pass
+
+
+def open_socket():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     if sys.platform == "win32":
         # Windows raises ConnectionResetError on recv after a send hit a closed port
@@ -153,52 +183,76 @@ def main():
         # Another copy already owns the port; exit before creating a second pad (no chime).
         log("Already running, exiting.")
         print(f"PadLink is already running in the background (UDP {PORT} is in use).")
-        print("To restart it: Stop-ScheduledTask PadLinkReceiver, then run this again.")
+        print("Use its tray icon to Quit, then run this again.")
         raise SystemExit(0)
-    _state["sock"] = sock
-    pad = get_pad()
-    advertise()
+    return sock
+
+
+def loop(sock):
     sock.settimeout(0.25)
-    print(f"PadLink listening on UDP {PORT} (virtual Xbox 360 pad created)")
-    print("Waiting for the phone...")
+    pad = None
     last = None
     last_input = time.monotonic()
-    idle = False
-    while True:
+    idle = True
+    while not _state["quit"]:
+        # Enable / Disable from the tray: create or remove the virtual controller.
+        if _state["enabled"] and pad is None:
+            pad = get_pad()
+            _state["error"] = False
+            advertise_start()
+            print(f"PadLink listening on UDP {PORT} (virtual Xbox 360 pad created)")
+            print("Waiting for the phone...")
+            last, idle, last_input = None, True, time.monotonic()
+        elif not _state["enabled"] and pad is not None:
+            try:
+                pad.reset()
+                pad.update()
+            except Exception:
+                pass
+            _state["large"] = _state["small"] = 0
+            _state["last_seen"] = 0.0
+            pad = None
+            destroy_pad()
+            advertise_stop()
+            print("PadLink disabled: virtual controller removed.")
+
         try:
             data, addr = sock.recvfrom(64)
-        except socket.timeout:
-            data = None
-        except OSError:
+        except (socket.timeout, OSError):
             data = None
 
-        if data and len(data) == PING_SIZE and struct.unpack_from("<H", data)[0] == PING_MAGIC:
-            _state["phone"] = addr
-            try:
-                sock.sendto(data, addr)
-            except OSError:
-                pass
-        elif data and len(data) == PACKET.size:
-            magic, seq, buttons, lt, rt, lx, ly, rx, ry = PACKET.unpack(data)
-            if magic == MAGIC:
+        if pad is not None and data:
+            if len(data) == PING_SIZE and struct.unpack_from("<H", data)[0] == PING_MAGIC:
                 _state["phone"] = addr
-            if magic == MAGIC and newer(seq, last):
-                if idle or last is None:
-                    print(f"Phone connected: {addr[0]}")
-                last = seq
-                last_input = time.monotonic()
-                idle = False
-                pad.report.wButtons = buttons
-                pad.report.bLeftTrigger = lt
-                pad.report.bRightTrigger = rt
-                pad.report.sThumbLX = lx
-                pad.report.sThumbLY = ly
-                pad.report.sThumbRX = rx
-                pad.report.sThumbRY = ry
-                pad.update()
+                _state["phone_ip"] = addr[0]
+                _state["last_seen"] = time.monotonic()
+                try:
+                    sock.sendto(data, addr)
+                except OSError:
+                    pass
+            elif len(data) == PACKET.size:
+                magic, seq, buttons, lt, rt, lx, ly, rx, ry = PACKET.unpack(data)
+                if magic == MAGIC:
+                    _state["phone"] = addr
+                    _state["phone_ip"] = addr[0]
+                    _state["last_seen"] = time.monotonic()
+                if magic == MAGIC and newer(seq, last):
+                    if idle or last is None:
+                        print(f"Phone connected: {addr[0]}")
+                    last = seq
+                    last_input = time.monotonic()
+                    idle = False
+                    pad.report.wButtons = buttons
+                    pad.report.bLeftTrigger = lt
+                    pad.report.bRightTrigger = rt
+                    pad.report.sThumbLX = lx
+                    pad.report.sThumbLY = ly
+                    pad.report.sThumbRX = rx
+                    pad.report.sThumbRY = ry
+                    pad.update()
 
         # Phone went quiet (app closed, controller unplugged): release everything.
-        if not idle and time.monotonic() - last_input > IDLE_AFTER:
+        if pad is not None and not idle and time.monotonic() - last_input > IDLE_AFTER:
             pad.reset()
             pad.update()
             _state["large"] = _state["small"] = 0
@@ -207,15 +261,127 @@ def main():
             idle = True
             last = None
 
+    if pad is not None:
+        pad.reset()
+        pad.update()
+    advertise_stop()
 
-if __name__ == "__main__":
-    # Never exit: if anything unexpected happens, log it and start over.
-    while True:
+
+def serve(sock):
+    # Never give up: if anything unexpected happens, log it and start over.
+    while not _state["quit"]:
         try:
-            main()
+            loop(sock)
         except Exception:
             err = traceback.format_exc()
+            _state["error"] = True
             log(err)
             print(err)
             print("PadLink hit an error (see above). Is the ViGEmBus driver installed? Retrying in 3s...")
             time.sleep(3)
+
+
+# ---------------------------------------------------------------- system tray
+
+MINT, AMBER, GRAY, RED, NAVY = (53, 224, 194), (245, 165, 36), (156, 163, 175), (255, 107, 107), (13, 19, 33)
+
+
+def status():
+    """(kind, text) for the tray: connected / waiting / disabled / error."""
+    if not _state["enabled"]:
+        return "disabled", "PadLink: disabled"
+    if _state["error"]:
+        return "error", "PadLink: error (see padlink.log)"
+    if time.monotonic() - _state["last_seen"] < 3:
+        return "connected", f"PadLink: phone connected ({_state['phone_ip']})"
+    return "waiting", "PadLink: waiting for phone"
+
+
+def make_icon(kind):
+    """The app icon with a small status badge in the corner."""
+    from PIL import Image, ImageDraw
+    here = os.path.dirname(os.path.abspath(__file__))
+    try:
+        base = Image.open(os.path.join(here, "icon.png")).convert("RGBA").resize((64, 64), Image.LANCZOS)
+    except Exception:
+        base = Image.new("RGBA", (64, 64), NAVY + (255,))
+        ImageDraw.Draw(base).ellipse((22, 22, 42, 42), fill=MINT + (255,))
+    if kind == "disabled":
+        alpha = base.getchannel("A").point(lambda a: int(a * 0.55))
+        base = base.convert("L").convert("RGBA")
+        base.putalpha(alpha)
+    d = ImageDraw.Draw(base)
+    color = {"connected": MINT, "waiting": AMBER, "disabled": GRAY, "error": RED}[kind]
+    d.ellipse((34, 34, 64, 64), fill=NAVY + (255,))
+    d.ellipse((39, 39, 59, 59), fill=color + (255,))
+    if kind == "disabled":  # pause bars
+        d.rectangle((44, 44, 47, 54), fill=NAVY + (255,))
+        d.rectangle((51, 44, 54, 54), fill=NAVY + (255,))
+    return base
+
+
+def run_tray():
+    import pystray
+
+    def toggle(icon, item):
+        _state["enabled"] = not _state["enabled"]
+        icon.update_menu()
+
+    def open_log(icon, item):
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "padlink.log")
+        try:
+            os.startfile(path if os.path.exists(path) else os.path.dirname(path))
+        except Exception:
+            pass
+
+    def quit_app(icon, item):
+        _state["quit"] = True
+        icon.stop()
+
+    menu = pystray.Menu(
+        pystray.MenuItem(lambda item: status()[1], None, enabled=False),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem(lambda item: "Enable" if not _state["enabled"] else "Disable", toggle),
+        pystray.MenuItem("Open log", open_log),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem("Quit", quit_app),
+    )
+    kind, text = status()
+    icon = pystray.Icon("PadLink", make_icon(kind), text, menu)
+
+    def refresh(icon):
+        icon.visible = True
+        shown = None
+        while not _state["quit"]:
+            now = status()
+            if now != shown:
+                shown = now
+                icon.icon = make_icon(now[0])
+                icon.title = now[1]
+                icon.update_menu()
+            time.sleep(1)
+
+    icon.run(lambda i: threading.Thread(target=refresh, args=(i,), daemon=True).start())
+
+
+def main():
+    print("PadLink receiver starting...")
+    sock = open_socket()
+    _state["sock"] = sock
+    threading.Thread(target=serve, args=(sock,), daemon=True).start()
+    if "--no-tray" not in sys.argv:
+        try:
+            run_tray()  # blocks until Quit
+        except ImportError:
+            print("Tray icon unavailable (run: pip install -r requirements.txt); running in console only.")
+        except Exception:
+            log("Tray failed: " + traceback.format_exc())
+    try:
+        while not _state["quit"]:
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        _state["quit"] = True
+
+
+if __name__ == "__main__":
+    main()

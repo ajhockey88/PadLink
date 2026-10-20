@@ -13,3 +13,9 @@ adapter, or Wi-Fi. Enter the PC's IP in the app.
 Run once in the receiver folder: `powershell -ExecutionPolicy Bypass -File install_startup.ps1`.
 It starts hidden at login and restarts if it crashes. Stop it with
 `Stop-ScheduledTask PadLinkReceiver`; remove it with `Unregister-ScheduledTask PadLinkReceiver`.
+
+## Tray icon
+The receiver shows a PadLink icon in the Windows notification area (click `^` if it is hidden).
+The badge shows the state: green = phone connected, amber = waiting for the phone, gray = disabled, red = error.
+Right-click for the menu: status line, **Disable** / **Enable** (Disable removes the virtual controller and stops
+answering the phone; Enable brings it back), **Open log**, and **Quit**. Run with `--no-tray` for a console-only receiver.
