@@ -1,7 +1,7 @@
 # PadLink receiver (Windows 11)
 
 1. Install ViGEmBus: https://github.com/nefarius/ViGEmBus/releases
-2. `pip install vgamepad`
+2. `pip install -r requirements.txt` (installs `vgamepad`)
 3. `python padlink_receiver.py`
 4. Allow Python through Windows Firewall (private networks) for UDP 26760.
 
