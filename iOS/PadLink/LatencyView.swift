@@ -15,17 +15,17 @@ struct LatencyView: View {
         history.isEmpty ? 0 : Double(history.filter { $0 < 0 }.count) / Double(history.count) * 100
     }
 
-    private func color(_ ms: Double) -> Color { ms < 8 ? .green : ms < 20 ? .yellow : .red }
+    private func color(_ ms: Double) -> Color { ms < 8 ? Theme.mint : ms < 20 ? Theme.amber : Theme.red }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
                 Text(rtt.map { String(format: "%.1f ms", $0) } ?? "No reply")
                     .font(.system(size: 34, weight: .semibold, design: .rounded))
-                    .foregroundStyle(rtt.map(color) ?? .red)
+                    .foregroundStyle(rtt.map(color) ?? Theme.red)
                 Spacer()
                 Text(rtt.map { String(format: "~%.1f ms one-way", $0 / 2) } ?? "check PC receiver")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.footnote).foregroundStyle(Theme.muted)
             }
             Graph(history: history, color: color)
                 .frame(height: 70)
@@ -37,14 +37,15 @@ struct LatencyView: View {
                 stat("lost", String(format: "%.0f%%", loss))
             }
             Text("Round trip phone \u{2192} PC \u{2192} phone. Excludes controller USB polling.")
-                .font(.caption2).foregroundStyle(.secondary)
+                .font(.caption2).foregroundStyle(Theme.muted)
         }
-        .padding(12)
-        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 12))
+        .padding(16)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Theme.line, lineWidth: 1))
     }
 
     private func stat(_ name: String, _ value: String) -> some View {
-        VStack { Text(value).font(.subheadline.monospacedDigit()); Text(name).font(.caption2).foregroundStyle(.secondary) }
+        VStack { Text(value).font(.subheadline.monospacedDigit()); Text(name).font(.caption2).foregroundStyle(Theme.muted) }
             .frame(maxWidth: .infinity)
     }
 
@@ -63,11 +64,11 @@ struct LatencyView: View {
                             p.move(to: CGPoint(x: 0, y: geo.size.height * y))
                             p.addLine(to: CGPoint(x: geo.size.width, y: geo.size.height * y))
                         }
-                    }.stroke(.secondary.opacity(0.2), lineWidth: 0.5)
+                    }.stroke(Theme.line, lineWidth: 0.5)
                     ForEach(Array(history.enumerated()), id: \.offset) { i, v in
                         let x = offset + CGFloat(i) * step
                         if v < 0 {
-                            Rectangle().fill(.red.opacity(0.6)).frame(width: max(step, 2), height: geo.size.height)
+                            Rectangle().fill(Theme.red.opacity(0.7)).frame(width: max(step, 2), height: geo.size.height)
                                 .position(x: x, y: geo.size.height / 2)
                         } else {
                             let h = max(2, CGFloat(v / ceiling) * geo.size.height)
@@ -75,7 +76,7 @@ struct LatencyView: View {
                                 .position(x: x, y: geo.size.height - h / 2)
                         }
                     }
-                    Text("\(Int(ceiling)) ms").font(.system(size: 9)).foregroundStyle(.secondary)
+                    Text("\(Int(ceiling)) ms").font(.system(size: 9)).foregroundStyle(Theme.muted)
                         .frame(maxHeight: .infinity, alignment: .top)
                 }
             }

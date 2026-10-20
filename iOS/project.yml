@@ -19,4 +19,5 @@ targets:
         NSBonjourServices: ["_padlink._udp"]
     settings:
       GENERATE_INFOPLIST_FILE: NO
+      ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
       PRODUCT_BUNDLE_IDENTIFIER: com.example.padlink

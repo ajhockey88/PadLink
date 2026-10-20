@@ -1,4 +1,10 @@
-# PadLink
+<p align="center">
+  <img src="design/icon-256.png" width="128" height="128" alt="PadLink app icon: a game controller sending a signal">
+</p>
+
+<h1 align="center">PadLink</h1>
+
+<p align="center">Use a wired controller on your iPhone as a controller on your Windows PC.</p>
 
 Use a wired USB-C controller on your iPhone as a controller on your Windows 11 PC, with no Bluetooth.
 The iPhone reads the controller over USB and sends its state to the PC over your network. A small
@@ -69,6 +75,12 @@ on the router and keep the phone out of Low Power Mode.
 - One virtual Xbox 360 pad. Several physical controllers are merged into it, not split into players.
 - Gyro, touchpad, adaptive triggers and rumble are not forwarded.
 - iOS can end a backgrounded app under memory pressure.
+
+## Design
+The app icon (a controller sending a signal) and its source files are in [`design/`](design/):
+`icon.svg` is the master artwork, `icon-1024.png` is the App Store size used by the iOS project, and
+`icon-256.png` is the preview shown above. Colors: navy `#0D1321`, off-white `#F2F4F8`, mint `#35E0C2`.
+The in-app logo (`iOS/PadLink/LogoMark.swift`) is the same artwork drawn as a vector.
 
 ## Build from source
 Releases are built by GitHub Actions (`.github/workflows/release.yml`, manual "Run workflow"). The iOS app

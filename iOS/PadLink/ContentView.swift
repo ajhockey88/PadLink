@@ -5,82 +5,161 @@ struct ContentView: View {
 
     private var statusColor: Color {
         switch link.state {
-        case .connected: return .green
-        case .stopped: return .gray
-        case .searching, .connecting, .reconnecting: return .orange
+        case .connected: return Theme.mint
+        case .stopped: return Theme.muted
+        case .searching, .connecting, .reconnecting: return Theme.amber
         }
     }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                HStack(spacing: 8) {
-                    Circle().fill(statusColor).frame(width: 12, height: 12)
-                    Text(link.state.text).font(.headline)
-                    Spacer()
-                    if let pc = link.connectedPC, link.state != .stopped {
-                        Text(pc).font(.footnote).foregroundStyle(.secondary)
-                    }
+        ZStack {
+            Theme.bg.ignoresSafeArea()
+            ScrollView {
+                VStack(spacing: 16) {
+                    header
+                    statusCard
+                    pcCard
+                    controllerCard
+                    actions
+                    if link.testing { LatencyView(rtt: link.rtt, history: link.history) }
+                    Text("\(link.packetsSent) packets sent")
+                        .font(.footnote)
+                        .foregroundStyle(Theme.muted)
+                        .padding(.top, 4)
                 }
-
-                Toggle("Find PC automatically", isOn: $link.auto)
-                if link.auto {
-                    pcList
-                } else {
-                    TextField("PC IP address", text: $link.manualHost)
-                        .textFieldStyle(.roundedBorder)
-                        .keyboardType(.decimalPad)
-                        .autocorrectionDisabled()
-                }
-
-                Text(link.controllerName ?? "No controller connected")
-                Toggle("Swap A and B", isOn: $link.swapAB)
-                Toggle("Swap X and Y", isOn: $link.swapXY)
-
-                Button(link.running ? "Stop" : "Start") {
-                    link.running ? link.stop() : link.start()
-                }
-                .buttonStyle(.borderedProminent)
-
-                if link.running {
-                    Button(link.testing ? "Stop latency test" : "Test latency") {
-                        link.testing ? link.stopTest() : link.startTest()
-                    }
-                    .buttonStyle(.bordered)
-                }
-                if link.testing { LatencyView(rtt: link.rtt, history: link.history) }
-
-                Text("\(link.packetsSent) packets sent")
-                    .font(.footnote).foregroundStyle(.secondary)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 16)
             }
-            .padding()
+            .scrollDismissesKeyboard(.interactively)
         }
+        .foregroundStyle(Theme.text)
+        .tint(Theme.mint)
+        .preferredColorScheme(.dark)
         .onAppear {
             // Start automatically every time the app opens.
             if !link.running && (link.auto || !link.manualHost.isEmpty) { link.start() }
         }
     }
 
-    @ViewBuilder private var pcList: some View {
-        if link.pcs.isEmpty {
-            Text("Looking for PadLink receivers on your network…")
-                .font(.footnote).foregroundStyle(.secondary)
-        } else {
-            VStack(spacing: 6) {
-                ForEach(link.pcs) { pc in
-                    Button {
-                        link.select(pc)
-                    } label: {
-                        HStack {
-                            Image(systemName: "desktopcomputer")
-                            Text(pc.id)
-                            Spacer()
-                            if link.connectedPC == pc.id { Image(systemName: "checkmark") }
-                        }
-                    }
-                    .buttonStyle(.bordered)
+    // MARK: Sections
+
+    private var header: some View {
+        HStack(spacing: 14) {
+            LogoMark(size: 60)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("PadLink")
+                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                Text("Wired controller to your PC")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.muted)
+            }
+            Spacer()
+        }
+        .padding(.bottom, 4)
+    }
+
+    private var statusCard: some View {
+        Card {
+            HStack(spacing: 10) {
+                StatusDot(color: statusColor, pulsing: link.state != .connected && link.state != .stopped)
+                Text(link.state.text).font(.headline)
+                Spacer()
+                if let pc = link.connectedPC, link.state != .stopped {
+                    Text(pc).font(.footnote).foregroundStyle(Theme.muted).lineLimit(1)
                 }
             }
         }
+    }
+
+    private var pcCard: some View {
+        Card(title: "PC") {
+            Toggle("Find PC automatically", isOn: $link.auto)
+            if link.auto {
+                pcList
+            } else {
+                TextField("PC IP address", text: $link.manualHost)
+                    .keyboardType(.decimalPad)
+                    .autocorrectionDisabled()
+                    .padding(12)
+                    .background(Theme.bg, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+        }
+    }
+
+    @ViewBuilder private var pcList: some View {
+        if link.pcs.isEmpty {
+            Text("Looking for PadLink receivers on your network…")
+                .font(.footnote)
+                .foregroundStyle(Theme.muted)
+        } else {
+            VStack(spacing: 8) {
+                ForEach(link.pcs) { pc in
+                    let selected = link.connectedPC == pc.id
+                    Button { link.select(pc) } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "desktopcomputer")
+                            Text(pc.id)
+                            Spacer()
+                            if selected { Image(systemName: "checkmark").foregroundStyle(Theme.mint) }
+                        }
+                        .padding(12)
+                        .frame(maxWidth: .infinity)
+                        .background(selected ? Theme.mint.opacity(0.12) : Theme.bg,
+                                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(selected ? Theme.mint : Theme.line, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private var controllerCard: some View {
+        Card(title: "Controller") {
+            HStack(spacing: 10) {
+                Image(systemName: "gamecontroller.fill")
+                    .foregroundStyle(link.controllerName == nil ? Theme.muted : Theme.mint)
+                Text(link.controllerName ?? "No controller connected")
+                    .foregroundStyle(link.controllerName == nil ? Theme.muted : Theme.text)
+            }
+            Divider().overlay(Theme.line)
+            Toggle("Swap A and B", isOn: $link.swapAB)
+            Toggle("Swap X and Y", isOn: $link.swapXY)
+        }
+    }
+
+    private var actions: some View {
+        VStack(spacing: 12) {
+            if link.running {
+                Button("Stop") { link.stop() }
+                    .buttonStyle(PrimaryButtonStyle(filled: false, color: Theme.red))
+                Button(link.testing ? "Stop latency test" : "Test latency") {
+                    link.testing ? link.stopTest() : link.startTest()
+                }
+                .buttonStyle(PrimaryButtonStyle(filled: false))
+            } else {
+                Button("Start") { link.start() }
+                    .buttonStyle(PrimaryButtonStyle())
+            }
+        }
+    }
+}
+
+/// Status light; pulses while the link is searching or reconnecting.
+private struct StatusDot: View {
+    let color: Color
+    let pulsing: Bool
+    @State private var dim = false
+
+    var body: some View {
+        Circle()
+            .fill(color)
+            .frame(width: 12, height: 12)
+            .shadow(color: color.opacity(0.7), radius: 4)
+            .opacity(pulsing && dim ? 0.3 : 1)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { dim = true }
+            }
     }
 }
