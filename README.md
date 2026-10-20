@@ -38,6 +38,33 @@ This is not a real USB connection: iOS cannot act as a USB device, so the PC see
 - Tray menu on the PC: Disable / Enable, Run at login, Pairing, Check for updates (checksum-verified self-update), Open log, Quit.
 - First-launch welcome card in the iPhone app.
 
+## Screenshots
+
+> These are design renders of the interface (the mockups it was built from), with sample numbers, not photos of a running device. Real screenshots can replace them: save yours over the files in [`docs/images/`](docs/images/) with the same names.
+
+**iPhone app**
+
+<table>
+  <tr>
+    <td align="center" valign="top"><img src="docs/images/app-welcome.png" width="230" alt="First-launch welcome card with three setup steps"><br><sub>First launch</sub></td>
+    <td align="center" valign="top"><img src="docs/images/app-connected.png" width="230" alt="Connected: PC list, controller, swap buttons and tuning sliders"><br><sub>Connected, with the tuning sliders</sub></td>
+    <td align="center" valign="top"><img src="docs/images/app-pairing.png" width="230" alt="Pairing code needed: the code typed in does not match the PC"><br><sub>Pairing code needed</sub></td>
+  </tr>
+  <tr>
+    <td align="center" valign="top"><img src="docs/images/app-benchmark.png" width="230" alt="Benchmark result for a DualSense controller and the saved controllers list"><br><sub>Benchmark result and saved controllers</sub></td>
+    <td align="center" valign="top"><img src="docs/images/app-latency.png" width="230" alt="Live latency test graph"><br><sub>Live latency test</sub></td>
+    <td></td>
+  </tr>
+</table>
+
+**PC tray menu** (status, Disable / Enable, Run at login, Pairing, updates, log, Quit)
+
+<img src="docs/images/tray-menu.png" width="860" alt="The PadLink tray menu when connected with an update available, with the Pairing submenu open, and when disabled">
+
+**PC dialogs, notifications and console**
+
+<img src="docs/images/windows-dialogs.png" width="860" alt="The pairing code dialog, the already-running message, update notifications and console output">
+
 ## Requirements
 - An iPhone with a USB-C port (iPhone 15 or newer) on iOS 16 or later, and a wired controller that works with it.
 - A Windows 11 PC. Windows 10 should work but is untested.
@@ -160,6 +187,7 @@ These numbers are rough; use the latency test on your own setup. If Wi-Fi is hit
 | `Windows/padlink_receiver.py` | The PC program (also packed into the exe), `requirements.txt`, `install_startup.ps1`, `stamp_version.py` |
 | `tests/` | Automated tests for the PC program (packet format, pairing, updater, first-run setup) |
 | `design/` | App icon artwork |
+| `docs/` | The interface mockups (`docs/mockups/`) and the images rendered from them for this README (`docs/images/`); regenerate with `python docs/render_mockups.py` (needs Node.js, Pillow and Chromium) |
 | `PROTOCOL.md` | The wire format |
 | `.github/workflows/release.yml` | Builds and publishes releases |
 

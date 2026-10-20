@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PadLink app, latency test</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+button{font-family: inherit}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; padding: 64px 20px 24px; background: #0D1321; color: #F2F4F8; font-family: -apple-system, 'SF Pro Text', system-ui, sans-serif; display: flex; flex-direction: column; gap: 16px; overflow: hidden">
+<div style="box-sizing: border-box; padding: 16px; border-radius: 16px; background: #161E32; border: 1px solid #26304A; display: flex; align-items: center; gap: 10px">
+<div style="width: 12px; height: 12px; border-radius: 50%; background: #35E0C2; box-shadow: 0 0 8px rgba(53,224,194,0.7)"></div>
+<div style="font-size: 17px; font-weight: 600; flex-grow: 1">Connected</div>
+<div style="font-size: 13px; color: #9AA6BF">DESKTOP-PC</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 12px">
+<button style="min-height: 52px; border-radius: 14px; border: 1.5px solid #FF6B6B; background: transparent; color: #FF6B6B; font-size: 17px; font-weight: 600">Stop</button>
+<button style="min-height: 52px; border-radius: 14px; border: 1.5px solid #35E0C2; background: transparent; color: #35E0C2; font-size: 17px; font-weight: 600">Stop latency test</button>
+</div>
+<div style="box-sizing: border-box; padding: 16px; border-radius: 16px; background: #161E32; border: 1px solid #26304A; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; align-items: baseline; justify-content: space-between">
+<div style="font-size: 36px; font-weight: 600; color: #35E0C2">6.4 ms</div>
+<div style="font-size: 12px; color: #9AA6BF">~3.2 ms one-way</div>
+</div>
+<div style="height: 120px; display: flex; align-items: flex-end; gap: 2px; border-bottom: 1px solid #26304A">
+<sc-for list="{{bars}}" as="b" hint-placeholder-count="40">
+<div style="flex: 1 1 0; height: {{b.h}}px; background: {{b.color}}; border-radius: 1px"></div>
+</sc-for>
+</div>
+<div style="display: flex; justify-content: space-between; text-align: center; padding-top: 4px">
+<div><div style="font-size: 16px">6.5</div><div style="font-size: 11px; color: #9AA6BF">avg</div></div>
+<div><div style="font-size: 16px">6.0</div><div style="font-size: 11px; color: #9AA6BF">min</div></div>
+<div><div style="font-size: 16px">15.2</div><div style="font-size: 11px; color: #9AA6BF">max</div></div>
+<div><div style="font-size: 16px">0.7</div><div style="font-size: 11px; color: #9AA6BF">jitter</div></div>
+<div><div style="font-size: 16px">3%</div><div style="font-size: 11px; color: #9AA6BF">lost</div></div>
+</div>
+<div style="font-size: 11px; color: #9AA6BF">Round trip phone → PC → phone. Excludes controller USB polling.</div>
+</div>
+<div style="font-size: 12px; color: #9AA6BF; text-align: center">48,210 packets sent</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+renderVals() {
+const samples = [6.1, 6.6, 6.3, 7.2, 6.0, 6.4, 6.8, 6.2, 9.5, 6.5, 6.3, 6.1, 6.7, 6.4, 6.2, 6.9, 6.3, 6.5, 15.2, 6.4, 6.1, -1, 6.3, 6.2, 6.8, 6.4, 6.0, 6.5, 6.7, 6.3, 6.4, 6.2, 6.6, 6.1, 6.9, 6.3, 6.5, 6.4, 6.2, 6.4];
+const ceiling = 20;
+const bars = samples.map((v) => {
+if (v < 0) return { h: 120, color: 'rgba(255,107,107,0.7)' };
+return { h: Math.max(3, Math.round((v / ceiling) * 120)), color: v < 8 ? '#35E0C2' : '#F5A524' };
+});
+return { bars };
+}
+}
+</script>
+</body>
+</html>

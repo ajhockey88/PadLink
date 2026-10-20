@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PadLink app, benchmark result</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+button{font-family: inherit}
+</style>
+</helmet>
+<div style="width: 390px; height: 1130px; box-sizing: border-box; padding: 64px 20px 24px; background: #0D1321; color: #F2F4F8; font-family: -apple-system, 'SF Pro Text', system-ui, sans-serif; display: flex; flex-direction: column; gap: 16px; overflow: hidden">
+<div style="box-sizing: border-box; padding: 16px; border-radius: 16px; background: #161E32; border: 1px solid #26304A; display: flex; align-items: center; gap: 10px">
+<div style="width: 12px; height: 12px; border-radius: 50%; background: #35E0C2; box-shadow: 0 0 8px rgba(53,224,194,0.7)"></div>
+<div style="font-size: 17px; font-weight: 600; flex-grow: 1">Connected</div>
+<div style="font-size: 13px; color: #9AA6BF">DESKTOP-PC</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 12px">
+<button style="min-height: 52px; border-radius: 14px; border: 1.5px solid #FF6B6B; background: transparent; color: #FF6B6B; font-size: 17px; font-weight: 600">Stop</button>
+<button style="min-height: 52px; border-radius: 14px; border: 1.5px solid #35E0C2; background: transparent; color: #35E0C2; font-size: 17px; font-weight: 600">Test latency</button>
+<button style="min-height: 52px; border-radius: 14px; border: 1.5px solid #35E0C2; background: transparent; color: #35E0C2; font-size: 17px; font-weight: 600">Run benchmark</button>
+</div>
+<div style="box-sizing: border-box; padding: 16px; border-radius: 16px; background: #161E32; border: 1px solid #26304A; display: flex; flex-direction: column; gap: 12px">
+<div style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; color: #9AA6BF">BENCHMARK</div>
+<div style="font-size: 15px; font-weight: 600">DualSense Wireless Controller (DualSense)</div>
+<div style="display: flex; align-items: baseline; gap: 8px">
+<div style="font-size: 34px; font-weight: 600; color: #35E0C2">5.2 ms</div>
+<div style="font-size: 16px; color: #9AA6BF">input latency</div>
+<div style="flex-grow: 1"></div>
+<div style="font-size: 13px; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: rgba(53,224,194,0.18); color: #35E0C2">Excellent</div>
+</div>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; text-align: center">
+<div><div style="font-size: 17px">250 Hz</div><div style="font-size: 11px; color: #9AA6BF">report rate</div></div>
+<div><div style="font-size: 17px">2.0 ms</div><div style="font-size: 11px; color: #9AA6BF">controller</div></div>
+<div><div style="font-size: 17px">3.2 ms</div><div style="font-size: 11px; color: #9AA6BF">network</div></div>
+</div>
+<div style="font-size: 11px; line-height: 1.4; color: #9AA6BF">Controller = half the average gap between its input reports (4.0 ms). Network = half the round trip. The PC, the game and your display add more.</div>
+<div style="font-size: 13px; color: #35E0C2">Previous run on this controller: 5.9 ms (-0.7 ms)</div>
+<div style="height: 1px; background: #26304A"></div>
+<div style="display: flex; justify-content: space-between; font-size: 16px"><span style="color: #9AA6BF">Network round trip</span><span>6.4 ms avg</span></div>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; text-align: center">
+<div><div style="font-size: 17px">6.3</div><div style="font-size: 11px; color: #9AA6BF">median</div></div>
+<div><div style="font-size: 17px">7.9</div><div style="font-size: 11px; color: #9AA6BF">95th pct</div></div>
+<div><div style="font-size: 17px">0.8</div><div style="font-size: 11px; color: #9AA6BF">jitter</div></div>
+<div><div style="font-size: 17px">5.6</div><div style="font-size: 11px; color: #9AA6BF">min</div></div>
+<div><div style="font-size: 17px">11.2</div><div style="font-size: 11px; color: #9AA6BF">max</div></div>
+<div><div style="font-size: 17px">0.0%</div><div style="font-size: 11px; color: #9AA6BF">lost</div></div>
+</div>
+<div style="font-size: 11px; color: #9AA6BF">200 of 200 replies.</div>
+<button style="align-self: flex-start; padding: 0; border: 0; background: transparent; color: #35E0C2; font-size: 13px">Run again</button>
+</div>
+<div style="box-sizing: border-box; padding: 16px; border-radius: 16px; background: #161E32; border: 1px solid #26304A; display: flex; flex-direction: column; gap: 12px">
+<div style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; color: #9AA6BF">SAVED CONTROLLERS</div>
+<sc-for list="{{saved}}" as="c" hint-placeholder-count="3">
+<div>
+<div style="display: flex; align-items: center; gap: 10px">
+<div style="flex-grow: 1; min-width: 0"><div style="font-size: 16px">{{c.name}}</div><div style="font-size: 12px; color: #9AA6BF; margin-top: 2px">{{c.detail}}</div></div>
+<div style="flex: none; white-space: nowrap; font-size: 17px; font-weight: 600; color: {{c.color}}">{{c.total}}</div>
+<div style="color: #9AA6BF; font-size: 18px" aria-hidden="true">✕</div>
+</div>
+<sc-if value="{{c.divider}}" hint-placeholder-val="{{ true }}"><div style="height: 1px; background: #26304A; margin-top: 12px"></div></sc-if>
+</div>
+</sc-for>
+<button style="align-self: flex-start; padding: 0; border: 0; background: transparent; color: #FF6B6B; font-size: 13px">Clear all results</button>
+</div>
+<div style="font-size: 12px; color: #9AA6BF; text-align: center">51,822 packets sent</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":1130}}'>
+class Component extends DCLogic {
+renderVals() {
+const saved = [
+{ name: 'DualSense Wireless Controller (DualSense)', detail: '250 Hz · 3 runs · best 5.2 ms', total: '5.2 ms', color: '#35E0C2', divider: true },
+{ name: 'Xbox Wireless Controller (Xbox One)', detail: '125 Hz · 2 runs · best 7.1 ms', total: '7.2 ms', color: '#35E0C2', divider: true },
+{ name: '8BitDo Pro 2 (Gamepad)', detail: '125 Hz · 1 run · best 9.6 ms', total: '9.6 ms', color: '#35E0C2', divider: false }
+];
+return { saved };
+}
+}
+</script>
+</body>
+</html>

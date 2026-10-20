@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PadLink Windows app</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+button{font-family: inherit}
+</style>
+</helmet>
+<div style="width: 1240px; height: 980px; box-sizing: border-box; padding: 40px; background: #DDE3EE; color: #0D1321; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; gap: 36px">
+<svg width="0" height="0" style="position: absolute" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<symbol id="art" viewBox="0 0 1024 1024">
+<rect width="1024" height="1024" fill="#0D1321"/>
+<g transform="translate(0 30)">
+<g fill="none" stroke="#35E0C2" stroke-width="34" stroke-linecap="round">
+<path d="M445.1 345.7A100 100 0 0 1 578.9 345.7"/>
+<path d="M401.6 297.4A165 165 0 0 1 622.4 297.4"/>
+<path d="M358.1 249.1A230 230 0 0 1 665.9 249.1"/>
+</g>
+<circle cx="512" cy="420" r="26" fill="#35E0C2"/>
+<g transform="translate(0 91)">
+<path d="M318 352H706C790 352 842 420 868 540C884 618 872 672 826 686C780 700 744 668 716 626C700 602 684 592 656 592H368C340 592 324 602 308 626C280 668 244 700 198 686C152 672 140 618 156 540C182 420 234 352 318 352Z" fill="#F2F4F8"/>
+<g fill="#0D1321">
+<rect x="285" y="462" width="90" height="36" rx="8"/>
+<rect x="312" y="435" width="36" height="90" rx="8"/>
+<circle cx="694" cy="432" r="24"/>
+<circle cx="646" cy="480" r="24"/>
+<circle cx="742" cy="480" r="24"/>
+</g>
+<circle cx="694" cy="528" r="24" fill="#35E0C2"/>
+</g>
+</g>
+</symbol>
+</defs>
+</svg>
+<div style="display: flex; flex-direction: column; gap: 14px">
+<div style="font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #3B4559">Dialogs</div>
+<div style="display: flex; gap: 40px; align-items: flex-start">
+<div style="width: 460px; border-radius: 8px; overflow: hidden; background: #FFFFFF; box-shadow: 0 10px 30px rgba(0,0,0,0.3); border: 1px solid #B8BEC9">
+<div style="height: 34px; padding: 0 0 0 12px; display: flex; align-items: center; justify-content: space-between; background: #F7F7F7; font-size: 12px">
+<span>PadLink pairing code</span>
+<span style="width: 46px; height: 34px; display: flex; align-items: center; justify-content: center; font-size: 14px" aria-hidden="true">✕</span>
+</div>
+<div style="display: flex; gap: 16px; padding: 24px 20px 24px; align-items: flex-start">
+<div style="width: 32px; height: 32px; border-radius: 50%; background: #0F6CBD; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-weight: 700; flex: none" aria-hidden="true">i</div>
+<div style="font-size: 14px; line-height: 1.5; color: #1A1A1A">
+<div>Pairing code: <b style="letter-spacing: 0.05em">K7QD-4FHX-93MP</b></div>
+<div style="margin-top: 12px">In the PadLink app on your iPhone, type this into the PC section's Pairing code box.</div>
+</div>
+</div>
+<div style="padding: 14px 20px; background: #F0F0F0; display: flex; justify-content: flex-end"><button style="min-width: 88px; padding: 6px 16px; border-radius: 4px; border: 1px solid #ADADAD; background: #FDFDFD; font-size: 13px; color: #1A1A1A">OK</button></div>
+</div>
+<div style="width: 460px; border-radius: 8px; overflow: hidden; background: #FFFFFF; box-shadow: 0 10px 30px rgba(0,0,0,0.3); border: 1px solid #B8BEC9">
+<div style="height: 34px; padding: 0 0 0 12px; display: flex; align-items: center; justify-content: space-between; background: #F7F7F7; font-size: 12px">
+<span>PadLink</span>
+<span style="width: 46px; height: 34px; display: flex; align-items: center; justify-content: center; font-size: 14px" aria-hidden="true">✕</span>
+</div>
+<div style="display: flex; gap: 16px; padding: 24px 20px; align-items: flex-start">
+<div style="width: 32px; height: 32px; border-radius: 50%; background: #0F6CBD; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-weight: 700; flex: none" aria-hidden="true">i</div>
+<div style="font-size: 14px; line-height: 1.5; color: #1A1A1A">PadLink is already running. Look for its icon in the system tray (click ^ if it is hidden). To start a new version, right-click it and choose Quit first.</div>
+</div>
+<div style="padding: 14px 20px; background: #F0F0F0; display: flex; justify-content: flex-end"><button style="min-width: 88px; padding: 6px 16px; border-radius: 4px; border: 1px solid #ADADAD; background: #FDFDFD; font-size: 13px; color: #1A1A1A">OK</button></div>
+</div>
+</div>
+</div>
+<div style="display: flex; gap: 40px; align-items: flex-start">
+<div style="display: flex; flex-direction: column; gap: 14px">
+<div style="font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #3B4559">Notifications</div>
+<div style="display: flex; flex-direction: column; gap: 12px">
+<sc-for list="{{toasts}}" as="t" hint-placeholder-count="4">
+<div style="width: 400px; box-sizing: border-box; padding: 12px 14px; border-radius: 8px; background: #2B2B2B; border: 1px solid #3E3E3E; box-shadow: 0 6px 18px rgba(0,0,0,0.3); color: #FFFFFF">
+<div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #C9C9C9">
+<svg width="16" height="16" viewBox="0 0 1024 1024" aria-hidden="true"><use href="#art" width="1024" height="1024"/></svg>
+<span style="flex-grow: 1">PadLink</span><span>now</span>
+</div>
+<div style="font-size: 14px; font-weight: 600; margin-top: 8px">{{t.title}}</div>
+<div style="font-size: 13px; line-height: 1.4; color: #DADADA; margin-top: 2px">{{t.text}}</div>
+</div>
+</sc-for>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 14px; flex-grow: 1">
+<div style="font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #3B4559">Console (running from source, or --no-tray)</div>
+<div style="border-radius: 8px; overflow: hidden; background: #0C0C0C; box-shadow: 0 10px 30px rgba(0,0,0,0.3); border: 1px solid #3A3A3A">
+<div style="height: 34px; padding: 0 12px; display: flex; align-items: center; background: #1F1F1F; color: #FFFFFF; font-size: 12px">Command Prompt - python padlink_receiver.py</div>
+<div style="padding: 14px 16px; font-family: Consolas, 'Cascadia Mono', monospace; font-size: 13px; line-height: 1.55; color: #CCCCCC; white-space: pre">PadLink receiver starting...
+Auto-discovery on: the app will find this PC as 'DESKTOP-PC'.
+PadLink listening on UDP 26760 (virtual Xbox 360 pad created)
+Waiting for the phone...
+Phone connected: 192.168.1.20
+Phone went quiet; controller released.
+Phone connected: 192.168.1.20
+PadLink disabled: virtual controller removed.
+PadLink listening on UDP 26760 (virtual Xbox 360 pad created)
+Waiting for the phone...</div>
+</div>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 14px">
+<div style="font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #3B4559">Files on the PC</div>
+<div style="display: flex; gap: 24px; flex-wrap: wrap">
+<div style="width: 280px; box-sizing: border-box; padding: 14px 16px; border-radius: 8px; background: #FFFFFF; border: 1px solid #B8BEC9"><div style="font-size: 14px; font-weight: 600">PadLinkReceiver.exe</div><div style="font-size: 13px; line-height: 1.4; color: #3B4559; margin-top: 4px">The whole app, about 19 MB. With Run at login on, a copy lives in %LOCALAPPDATA%\PadLink.</div></div>
+<div style="width: 280px; box-sizing: border-box; padding: 14px 16px; border-radius: 8px; background: #FFFFFF; border: 1px solid #B8BEC9"><div style="font-size: 14px; font-weight: 600">settings.json</div><div style="font-size: 13px; line-height: 1.4; color: #3B4559; margin-top: 4px">Next to the exe: pairing code, whether pairing is required, automatic update check.</div></div>
+<div style="width: 280px; box-sizing: border-box; padding: 14px 16px; border-radius: 8px; background: #FFFFFF; border: 1px solid #B8BEC9"><div style="font-size: 14px; font-weight: 600">padlink.log</div><div style="font-size: 13px; line-height: 1.4; color: #3B4559; margin-top: 4px">Errors and update messages. Tray menu &gt; Open log.</div></div>
+<div style="width: 280px; box-sizing: border-box; padding: 14px 16px; border-radius: 8px; background: #FFFFFF; border: 1px solid #B8BEC9"><div style="font-size: 14px; font-weight: 600">Windows startup entry</div><div style="font-size: 13px; line-height: 1.4; color: #3B4559; margin-top: 4px">Added or removed by the Run at login checkbox. No admin rights needed.</div></div>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1240,"height":980}}'>
+class Component extends DCLogic {
+renderVals() {
+const toasts = [
+{ title: 'PadLink update', text: 'PadLink v0.5.0 is available. Right-click the tray icon to install it.' },
+{ title: 'PadLink update', text: 'You are up to date (version 0.5.0).' },
+{ title: 'PadLink', text: 'Update failed: downloaded file did not match its checksum' },
+{ title: 'PadLink update', text: 'Could not check for updates. Are you online?' }
+];
+return { toasts };
+}
+}
+</script>
+</body>
+</html>

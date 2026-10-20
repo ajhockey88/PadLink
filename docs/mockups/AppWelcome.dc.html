@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PadLink app, welcome</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+button{font-family: inherit}
+a{color: #35E0C2}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; padding: 64px 20px 24px; background: #0D1321; color: #F2F4F8; font-family: -apple-system, 'SF Pro Text', system-ui, sans-serif; display: flex; flex-direction: column; gap: 16px; overflow: hidden">
+<div style="display: flex; align-items: center; gap: 14px; padding-bottom: 4px">
+<div style="width: 60px; height: 60px; border-radius: 13px; overflow: hidden; flex: none">
+<svg width="60" height="60" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="PadLink icon">
+<rect width="1024" height="1024" fill="#0D1321"/>
+<g transform="translate(0 30)">
+<g fill="none" stroke="#35E0C2" stroke-width="34" stroke-linecap="round">
+<path d="M445.1 345.7A100 100 0 0 1 578.9 345.7"/>
+<path d="M401.6 297.4A165 165 0 0 1 622.4 297.4"/>
+<path d="M358.1 249.1A230 230 0 0 1 665.9 249.1"/>
+</g>
+<circle cx="512" cy="420" r="26" fill="#35E0C2"/>
+<g transform="translate(0 91)">
+<path d="M318 352H706C790 352 842 420 868 540C884 618 872 672 826 686C780 700 744 668 716 626C700 602 684 592 656 592H368C340 592 324 602 308 626C280 668 244 700 198 686C152 672 140 618 156 540C182 420 234 352 318 352Z" fill="#F2F4F8"/>
+<g fill="#0D1321">
+<rect x="285" y="462" width="90" height="36" rx="8"/>
+<rect x="312" y="435" width="36" height="90" rx="8"/>
+<circle cx="694" cy="432" r="24"/>
+<circle cx="646" cy="480" r="24"/>
+<circle cx="742" cy="480" r="24"/>
+</g>
+<circle cx="694" cy="528" r="24" fill="#35E0C2"/>
+</g>
+</g>
+</svg>
+</div>
+<div>
+<div style="font-size: 30px; font-weight: 700; line-height: 1.1">PadLink</div>
+<div style="font-size: 15px; color: #9AA6BF; margin-top: 2px">Wired controller to your PC</div>
+</div>
+</div>
+<div style="box-sizing: border-box; padding: 16px; border-radius: 16px; background: #161E32; border: 1px solid #26304A; display: flex; flex-direction: column; gap: 12px">
+<div style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; color: #9AA6BF">WELCOME</div>
+<div style="font-size: 17px; font-weight: 600">Three steps</div>
+<div style="display: flex; gap: 12px; align-items: flex-start">
+<div style="width: 22px; height: 22px; border-radius: 50%; background: #35E0C2; color: #0D1321; font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none">1</div>
+<div style="font-size: 15px; line-height: 1.4">On your PC, download and run PadLink for Windows. The first time, it sets itself up: the controller driver, the firewall, and (if you want) starting at login.</div>
+</div>
+<div style="display: flex; align-items: center; gap: 8px; font-size: 15px; color: #35E0C2" aria-hidden="true"><span>⤓</span><span>Get PadLink for Windows</span></div>
+<div style="display: flex; gap: 12px; align-items: flex-start">
+<div style="width: 22px; height: 22px; border-radius: 50%; background: #35E0C2; color: #0D1321; font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none">2</div>
+<div style="font-size: 15px; line-height: 1.4">Plug your controller into this iPhone's USB-C port.</div>
+</div>
+<div style="display: flex; gap: 12px; align-items: flex-start">
+<div style="width: 22px; height: 22px; border-radius: 50%; background: #35E0C2; color: #0D1321; font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none">3</div>
+<div style="font-size: 15px; line-height: 1.4">This app finds your PC by itself. Allow Local Network access if iOS asks. If the PC gave you a pairing code, type it under PC below.</div>
+</div>
+<button style="min-height: 52px; border-radius: 14px; border: 0; background: #35E0C2; color: #0D1321; font-size: 17px; font-weight: 600">Got it</button>
+</div>
+<div style="box-sizing: border-box; padding: 16px; border-radius: 16px; background: #161E32; border: 1px solid #26304A; display: flex; align-items: center; gap: 10px">
+<div style="width: 12px; height: 12px; border-radius: 50%; background: #F5A524; box-shadow: 0 0 8px rgba(245,165,36,0.7); opacity: 0.6"></div>
+<div style="font-size: 17px; font-weight: 600; flex-grow: 1">Searching for PC…</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>
