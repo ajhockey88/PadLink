@@ -416,10 +416,11 @@ final class PadLink: ObservableObject {
         persistSaved()
     }
 
-    /// During a benchmark only: ask iOS for every input report with its own timestamp (iOS 16 input state queue),
+    /// During a benchmark only: ask iOS for every input report with its own timestamp (iOS 17 input state queue),
     /// which is more precise than counting callbacks. Normal play never uses this, so it cannot affect it.
     private func enableInputQueues() {
         benchLock.lock(); queueStamps = [:]; benchLock.unlock()
+        guard #available(iOS 17.0, *) else { return }  // the queue API needs iOS 17; every USB-C iPhone has it
         for c in attached {
             guard let name = controllerName(c) else { continue }
             let input = c.input
@@ -439,6 +440,7 @@ final class PadLink: ObservableObject {
     }
 
     private func disableInputQueues() {
+        guard #available(iOS 17.0, *) else { return }
         for c in attached {
             c.input.inputStateAvailableHandler = nil
             c.input.inputStateQueueDepth = 0
