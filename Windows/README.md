@@ -25,7 +25,7 @@ Do not forward any port on your router; the phone and PC talk over your own netw
 At run time it also creates `settings.json` (pairing code and whether it is required, automatic update check, first-run flag) and `padlink.log` next to the script.
 
 ## Tray icon
-The receiver shows a PadLink icon in the Windows notification area (click `^` if it is hidden). The badge shows the state: green = phone connected, amber = waiting for the phone, gray = disabled, red = error. Right-click for the menu: status line, **Disable** / **Enable** (Disable removes the virtual controller and stops answering the phone), **Run at login**, **Pairing** (require / show / replace the code), **Install update** / **Check for updates** / **Check automatically**, **Open log** and **Quit**.
+The receiver shows a PadLink icon in the Windows notification area (click `^` if it is hidden). The badge shows the state: green = phone connected, amber = waiting for the phone, gray = disabled, red = error. Right-click for the menu: status line, **Disable** / **Enable** (Disable removes the virtual controller and stops answering the phone), **Run at login**, **Performance mode** (on by default: high priority, no Windows efficiency mode, 1 ms timer), **Pairing** (require / show / replace the code), **Install update** / **Check for updates** / **Check automatically**, **Open log** and **Quit**.
 
 When running from source the updater does not replace files; **Install update** opens the releases page.
 

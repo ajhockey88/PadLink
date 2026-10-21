@@ -160,6 +160,17 @@ struct ContentView: View {
                 Button("Reset to 0%") { link.resetTuning() }
                     .font(.footnote)
             }
+            Divider().overlay(Theme.line)
+            Text("Send rate")
+            Picker("Send rate", selection: $link.sendRate) {
+                Text("250 Hz").tag(250)
+                Text("500 Hz").tag(500)
+                Text("1000 Hz").tag(1000)
+            }
+            .pickerStyle(.segmented)
+            Text("How often your controller's current state is re-sent even if nothing changed. Changes are always sent immediately. Higher recovers from a dropped packet sooner but uses more battery and Wi-Fi.")
+                .font(.caption2)
+                .foregroundStyle(Theme.muted)
         }
     }
 

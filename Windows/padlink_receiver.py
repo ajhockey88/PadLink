@@ -73,7 +73,8 @@ def log(msg):
 
 _pad = None
 _state = {"sock": None, "phone": None, "large": 0, "small": 0,
-          "enabled": True, "quit": False, "error": False, "note": "", "update": None, "notified": None, "key": b"", "require_pairing": False, "phone_signed": False, "last_seen": 0.0, "phone_ip": None, "ready": False}
+          "enabled": True, "quit": False, "error": False, "note": "", "update": None, "notified": None, "key": b"", "require_pairing": False, "phone_signed": False, "last_seen": 0.0, "phone_ip": None, "ready": False,
+          "performance": True, "perf_thread": None, "perf_timer": False}
 _started = {"rumble": False, "watch": False}
 _zeroconf = {"zc": None, "addrs": []}
 
@@ -331,6 +332,9 @@ def loop(sock):
     last_input = time.monotonic()
     idle = True
     while not _state["quit"]:
+        if _state["perf_thread"] != _state["performance"]:
+            apply_thread_performance(_state["performance"])
+            _state["perf_thread"] = _state["performance"]
         # Enable / Disable from the tray: create or remove the virtual controller.
         if _state["enabled"] and pad is None:
             try:
@@ -413,6 +417,65 @@ def loop(sock):
         pad.reset()
         pad.update()
     advertise_stop()
+
+
+# ------------------------------------------------------------- performance mode
+
+def apply_process_performance(on):
+    """Windows only: stop Windows slowing PadLink down while it sits in the tray.
+
+    On: high priority, opt out of efficiency mode (EcoQoS), and 1 ms system timer. Off: back to the defaults.
+    Returns True if it could be applied. Nothing here touches the controller itself."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+        kernel32 = ctypes.windll.kernel32
+        process = kernel32.GetCurrentProcess()
+        kernel32.SetPriorityClass(process, 0x00000080 if on else 0x00000020)  # HIGH / NORMAL
+
+        class ThrottlingState(ctypes.Structure):
+            _fields_ = [("Version", wintypes.ULONG), ("ControlMask", wintypes.ULONG), ("StateMask", wintypes.ULONG)]
+
+        # ControlMask 1 = we decide; StateMask 0 = never throttle. ControlMask 0 = system default.
+        state = ThrottlingState(1, 1 if on else 0, 0)
+        kernel32.SetProcessInformation(process, 4, ctypes.byref(state), ctypes.sizeof(state))  # ProcessPowerThrottling
+        winmm = ctypes.windll.winmm
+        if on and not _state["perf_timer"]:
+            winmm.timeBeginPeriod(1)
+            _state["perf_timer"] = True
+        elif not on and _state["perf_timer"]:
+            winmm.timeEndPeriod(1)
+            _state["perf_timer"] = False
+        return True
+    except Exception:
+        log("Performance mode could not be applied: " + traceback.format_exc())
+        return False
+
+
+def apply_thread_performance(on):
+    """Raise (or restore) the priority of the thread that reads controller packets. Call from that thread."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        kernel32.SetThreadPriority(kernel32.GetCurrentThread(), 2 if on else 0)  # HIGHEST / NORMAL
+        return True
+    except Exception:
+        return False
+
+
+def load_performance():
+    _state["performance"] = bool(load_settings().get("performance_mode", True))
+    apply_process_performance(_state["performance"])
+
+
+def set_performance(on):
+    save_settings(performance_mode=bool(on))
+    _state["performance"] = bool(on)
+    apply_process_performance(bool(on))
 
 
 def serve(sock):
@@ -892,6 +955,10 @@ def run_tray():
         load_pairing()
         show_code()
 
+    def toggle_performance(icon, item):
+        set_performance(not _state["performance"])
+        icon.update_menu()
+
     def do_update(icon, item):
         threading.Thread(target=install_update, args=(icon,), daemon=True).start()
 
@@ -900,6 +967,8 @@ def run_tray():
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(lambda item: "Enable" if not _state["enabled"] else "Disable", toggle),
         pystray.MenuItem("Run at login", toggle_autostart, checked=lambda item: _state.get("autostart", False),
+                         visible=sys.platform == "win32"),
+        pystray.MenuItem("Performance mode", toggle_performance, checked=lambda item: _state["performance"],
                          visible=sys.platform == "win32"),
         pystray.MenuItem("Pairing", pystray.Menu(
             pystray.MenuItem("Require pairing code", toggle_pairing, checked=lambda item: _state["require_pairing"]),
@@ -941,6 +1010,7 @@ def main():
     sock = open_socket()
     _state["sock"] = sock
     load_pairing()
+    load_performance()
     threading.Thread(target=serve, args=(sock,), daemon=True).start()
     threading.Thread(target=first_run_wizard, daemon=True).start()
     if "--no-tray" not in sys.argv:

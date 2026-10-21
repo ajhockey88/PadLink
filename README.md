@@ -92,7 +92,8 @@ Now play. Close the app whenever you like; the PC program keeps running and the 
 - **Runs in the background** on the phone: switch apps or lock the screen and it keeps going.
 - **Sets itself up** on the PC: one `.exe`, one approval prompt, a tray icon, optional start at login, self-updates.
 - **Optional pairing code** so only your phone can send input to your PC.
-- **Tuning:** swap A/B and X/Y, stick and trigger dead zones.
+- **Tuning:** swap A/B and X/Y, stick and trigger dead zones, and a send-rate setting.
+- **Performance mode** on the PC (on by default) so Windows never slows PadLink down in the background.
 - **Measuring:** live latency graph and a controller benchmark that saves a result per controller.
 - **Private:** nothing leaves your network except the update check; no accounts, no analytics.
 
@@ -120,6 +121,7 @@ If more than one PC answers, tap the one you want; the app remembers. **Find PC 
 ### Tuning
 - **Swap A and B** / **Swap X and Y** flip those face buttons.
 - **Stick dead zone** and **Trigger dead zone** (0-30%) ignore small movement near the center (stick drift) and rescale the rest, so full travel still reaches 100%.
+- **Send rate** (250, 500 or 1000 Hz) is how often the controller's current state is re-sent even when nothing changed. A change is always sent the instant it happens, so this does not make normal input faster; a higher rate only recovers sooner from a dropped packet, and costs battery and Wi-Fi time. 250 Hz is right for most setups.
 
 ### Pairing (recommended)
 Without it, anyone on your network could send controller input to your PC. Turn it on at the first-run question, or any time with tray > **Pairing** > **Require pairing code**. A message shows a 12-character code like `K7QD-4FHX-93MP`. Type it into the **Pairing code** box in the app (PC card) once; it is remembered. From then on the PC ignores anything not signed with that code, and the app tells you if the code is missing or wrong. **New pairing code...** replaces it.
@@ -130,6 +132,7 @@ Pairing proves a packet came from your phone; it does not encrypt the traffic or
 The badge on the icon shows the state: green = phone connected, amber = waiting for the phone (or setting up / updating), gray = disabled, red = error. Hover for the exact status. Right-click for:
 - **Disable / Enable:** Disable removes the virtual controller from Windows and stops answering the phone.
 - **Run at login:** starts it hidden every time you sign in (no administrator rights needed).
+- **Performance mode:** on by default. Gives PadLink high priority, stops Windows putting it in efficiency mode (which can add delay to a tray program), and asks for a 1 ms system timer. Uncheck it if you ever want PadLink to behave like an ordinary background program.
 - **Pairing:** require, show or replace the code.
 - **Install update / Check for updates / Check automatically:** PadLink checks GitHub about once a day, downloads a new version when you choose, verifies its SHA-256 checksum and restarts on it. (Versions before 0.4.1 have no updater: replace them by hand once. The iPhone app is not covered; reinstall its `.ipa`.)
 - **Open log** and **Quit.**
@@ -201,6 +204,14 @@ No. The iPhone app is built in the cloud and installed from Windows with Sideloa
 <summary><b>Why not just use Bluetooth, or a long wire?</b></summary>
 
 Bluetooth is convenient but adds delay and jitter. A long wire to the PC is fast but awkward on a couch. PadLink gives you a wired controller (to the phone) and a steady network link (phone to PC), so you get the benefit of both.
+</details>
+
+<details>
+<summary><b>Can PadLink overclock my controller?</b></summary>
+
+Not the controller itself, and no iPhone app can. How often a controller reports its state (its polling rate, for example 125 Hz or 1000 Hz) is set by the controller's own firmware, and iOS simply follows it. PadLink does everything on its own side that it can: it sends every change immediately, offers the **Send rate** setting, and **Performance mode** on the PC keeps Windows from throttling it.
+
+To raise the controller's real rate, look at the controller: some have a polling-rate or "high speed" setting in their own app or firmware, or a mode switch (often wired mode only), and a wired USB connection is always faster than Bluetooth. Then run **Run benchmark** before and after and compare **report rate**, which is the number that changes if it worked. It matters: the controller adds about half the gap between its reports on average, so 125 Hz (8 ms gap) adds about 4 ms and 1000 Hz (1 ms gap) about 0.5 ms. PC-side polling-rate tools only affect controllers plugged into the PC, not ones plugged into the phone.
 </details>
 
 <details>

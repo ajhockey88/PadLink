@@ -90,13 +90,20 @@ struct Tuning {
 final class PadLink: ObservableObject {
     static let port: NWEndpoint.Port = 26760
     static let serviceType = "_padlink._udp"
-    static let heartbeat: TimeInterval = 0.004  // resend at 250 Hz so a lost packet self-heals
     static let historyLength = 120
     private static let second: UInt64 = 1_000_000_000
 
     @Published var controllerName: String?
     @Published var running = false
     @Published var packetsSent = 0
+    /// How often the controller's current state is re-sent even if nothing changed (changes always go out at once).
+    @Published var sendRate = (UserDefaults.standard.object(forKey: "sendHz") as? Int) ?? 250 {
+        didSet {
+            UserDefaults.standard.set(sendRate, forKey: "sendHz")
+            let interval = 1.0 / Double(max(sendRate, 1))
+            queue.async { self.timer?.schedule(deadline: .now(), repeating: interval) }
+        }
+    }
     @Published var state: LinkState = .stopped
     @Published var pcs: [DiscoveredPC] = []
     @Published var selectedPC: String? = UserDefaults.standard.string(forKey: "pcName")
@@ -193,6 +200,7 @@ final class PadLink: ObservableObject {
     private var browser: NWBrowser?
     private var currentTarget: String?
     private var timer: DispatchSourceTimer?
+    private var sentCount = 0  // queue; copied to packetsSent a few times a second, not per packet
     private var tickTimer: DispatchSourceTimer?
     private var seq: UInt16 = 0
     private var pingSeq: UInt16 = 0
@@ -303,7 +311,7 @@ final class PadLink: ObservableObject {
             openLink()
 
             let t = DispatchSource.makeTimerSource(queue: queue)
-            t.schedule(deadline: .now(), repeating: Self.heartbeat)
+            t.schedule(deadline: .now(), repeating: 1.0 / Double(max(sendRate, 1)))
             t.setEventHandler { [weak self] in self?.sendNow() }
             t.resume()
             timer = t
@@ -553,8 +561,10 @@ final class PadLink: ObservableObject {
             if now - lastReconnect > 3 * Self.second { reconnect() }
         }
 
+        let sentNow = sentCount
         DispatchQueue.main.async {
             if self.rumbleOn, now - self.rumbleStamp > 600_000_000 { self.stopRumble() }
+            if self.packetsSent != sentNow { self.packetsSent = sentNow }
         }
     }
 
@@ -625,7 +635,7 @@ final class PadLink: ObservableObject {
         let data = signed(Self.encode(pads, seq: seq, tuning: tuning))
         seq &+= 1
         conn.send(content: data, completion: .idempotent)
-        DispatchQueue.main.async { self.packetsSent += 1 }
+        sentCount &+= 1
     }
 
     // MARK: Rumble (main)

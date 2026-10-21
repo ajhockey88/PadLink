@@ -293,6 +293,42 @@ class FirstRunSetup(unittest.TestCase):
         run.assert_not_called()
 
 
+class PerformanceMode(unittest.TestCase):
+    def setUp(self):
+        self.r = load_receiver()
+
+    def test_on_by_default_and_remembered(self):
+        r = self.r
+        r.load_performance()
+        self.assertTrue(r._state["performance"])
+        r.set_performance(False)
+        self.assertFalse(r.load_settings()["performance_mode"])
+        r._state["performance"] = True
+        r.load_performance()  # reads the saved choice back
+        self.assertFalse(r._state["performance"])
+
+    def test_harmless_off_windows(self):
+        r = self.r
+        self.assertFalse(r.apply_process_performance(True))  # not Windows: nothing to do, no error
+        self.assertFalse(r.apply_thread_performance(True))
+
+    def test_loop_follows_the_setting(self):
+        r = self.r
+        r.PORT = free_port()
+        calls = []
+        with mock.patch.object(r, "apply_thread_performance", lambda on: calls.append(on)):
+            sock = r.open_socket()
+            r._state["sock"] = sock
+            worker = threading.Thread(target=r.serve, args=(sock,), daemon=True)
+            worker.start()
+            time.sleep(0.6)
+            r.set_performance(False)  # the tray checkbox
+            time.sleep(0.6)
+            r._state["quit"] = True
+            worker.join(3)
+        self.assertEqual(calls[:2], [True, False])
+
+
 class OverUdp(unittest.TestCase):
     """Runs the real receive loop on localhost with a fake virtual pad."""
 
