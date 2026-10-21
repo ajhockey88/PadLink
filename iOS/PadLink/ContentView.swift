@@ -201,6 +201,15 @@ struct ContentView: View {
                     .buttonStyle(PrimaryButtonStyle(filled: false))
                     .disabled(link.benchmark.isRunning || link.state != .connected)
                     .opacity(link.state == .connected ? 1 : 0.5)
+                Toggle(isOn: $link.preciseTimestamps) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Precise timestamps (experimental)").font(.footnote)
+                        Text("Uses iOS's own input timing in the benchmark. Off by default; turn it off if the app ever crashes.")
+                            .font(.caption2)
+                            .foregroundStyle(Theme.muted)
+                    }
+                }
+                .disabled(link.benchmark.isRunning)
             } else {
                 Button("Start") { link.start() }
                     .buttonStyle(PrimaryButtonStyle())

@@ -114,6 +114,12 @@ final class PadLink: ObservableObject {
     @Published var benchmark: BenchmarkState = .idle
     @Published var savedControllers: [SavedController] = PadLink.loadSaved()
     @Published var previousRun: BenchmarkRun?  // last run on the same controller, for comparison
+    /// Experimental, off by default: read each input report's own iOS timestamp during a benchmark (iOS 17).
+    @Published var preciseTimestamps = UserDefaults.standard.bool(forKey: "preciseTS") {
+        didSet { UserDefaults.standard.set(preciseTimestamps, forKey: "preciseTS") }
+    }
+    /// Set at launch if the previous benchmark never finished, so a crash is noticed and reported.
+    @Published var crashNote: String?
     @Published var rtt: Double?               // latest, milliseconds
     @Published var history: [Double] = []     // recent samples, -1 = lost
 
@@ -218,6 +224,13 @@ final class PadLink: ObservableObject {
     private let benchInputQueue = DispatchQueue(label: "padlink.bench.input", qos: .userInteractive)
     private let benchLock = NSLock()
     private var queueStamps: [String: [UInt64]] = [:]  // guarded by benchLock: event time per input report
+    private var queuesActive = false                   // main thread: the input queue is switched on
+
+    /// Breadcrumb for crash diagnosis: the step a benchmark is in. "done" means it finished normally.
+    private func stage(_ name: String) {
+        UserDefaults.standard.set(name, forKey: "benchStage")
+        UserDefaults.standard.synchronize()  // flush now: a crash right after must not lose it
+    }
     private var benchTicks = 0
     private var benchSent = 0
     private var benchSeqs = Set<UInt16>()
@@ -245,6 +258,12 @@ final class PadLink: ObservableObject {
             if let c = n.object as? GCController { self?.detach(c) }
         }
         GCController.controllers().forEach(attach)
+        if let last = UserDefaults.standard.string(forKey: "benchStage"), last != "done" {
+            crashNote = "The last benchmark ended unexpectedly (during: \(last)). Precise timestamps were turned off. Please report this step name."
+            preciseTimestamps = false
+            UserDefaults.standard.set(false, forKey: "preciseTS")
+            UserDefaults.standard.set("done", forKey: "benchStage")
+        }
     }
 
     // MARK: Controllers
@@ -420,7 +439,8 @@ final class PadLink: ObservableObject {
     /// which is more precise than counting callbacks. Normal play never uses this, so it cannot affect it.
     private func enableInputQueues() {
         benchLock.lock(); queueStamps = [:]; benchLock.unlock()
-        guard #available(iOS 17.0, *) else { return }  // the queue API needs iOS 17; every USB-C iPhone has it
+        guard preciseTimestamps, #available(iOS 17.0, *) else { return }  // needs iOS 17; every USB-C iPhone has it
+        queuesActive = true
         for c in attached {
             guard let name = controllerName(c) else { continue }
             let input = c.input
@@ -429,7 +449,8 @@ final class PadLink: ObservableObject {
             input.inputStateAvailableHandler = { [weak self] input in
                 var stamps: [UInt64] = []
                 while let state = input.nextInputState() {
-                    stamps.append(UInt64(max(0, state.lastEventTimestamp) * 1_000_000_000))
+                    let seconds = state.lastEventTimestamp
+                    if seconds.isFinite, seconds > 0, seconds < 1e9 { stamps.append(UInt64(seconds * 1_000_000_000)) }
                 }
                 guard let self, !stamps.isEmpty else { return }
                 self.benchLock.lock()
@@ -440,10 +461,17 @@ final class PadLink: ObservableObject {
     }
 
     private func disableInputQueues() {
-        guard #available(iOS 17.0, *) else { return }
-        for c in attached {
-            c.input.inputStateAvailableHandler = nil
-            c.input.inputStateQueueDepth = 0
+        guard queuesActive, #available(iOS 17.0, *) else { return }
+        queuesActive = false
+        let inputs = attached.map { $0.input }
+        for input in inputs { input.inputStateAvailableHandler = nil }  // stop callbacks first
+        stage("finish:queue-depth")
+        // Switch the queue off on its own queue after pending callbacks have had time to finish,
+        // not on the main thread while one may still be draining.
+        benchInputQueue.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.stage("finish:queue-depth")
+            for input in inputs { input.inputStateQueueDepth = 0 }
+            self?.stage("done")
         }
     }
 
@@ -453,11 +481,14 @@ final class PadLink: ObservableObject {
             if !benchmark.isRunning { benchmark = .failed("Connect to a PC first, then run the benchmark.") }
             return
         }
+        stage("start")
+        crashNote = nil
         benchEvents = []
         benchCapturing = true
         previousRun = nil
         benchmark = .running(0)
         enableInputQueues()
+        stage("running")
         queue.async { [self] in
             benchRTTs = []; benchSeqs = []; benchSent = 0; benchTicks = 0; benchRunning = true
             benchTimer?.cancel()
@@ -473,6 +504,7 @@ final class PadLink: ObservableObject {
         benchCapturing = false
         disableInputQueues()
         if benchmark.isRunning { benchmark = .idle }
+        if !queuesActive { stage("done") }
         queue.async { [self] in
             benchRunning = false
             benchTimer?.cancel(); benchTimer = nil
@@ -497,17 +529,21 @@ final class PadLink: ObservableObject {
         let sent = benchSent, rtts = benchRTTs
         DispatchQueue.main.async {
             self.benchCapturing = false
+            self.stage("finish:stop")
+            let hadQueues = self.queuesActive
             self.disableInputQueues()
-            guard self.benchmark.isRunning else { return }  // cancelled meanwhile
+            guard self.benchmark.isRunning else { if !hadQueues { self.stage("done") }; return }  // cancelled meanwhile
             if sent == 0 || rtts.isEmpty {
                 self.benchmark = .failed(sent == 0 ? "Not connected to a PC." : "The PC did not answer any pings. Check the connection and the pairing code.")
+                if !hadQueues { self.stage("done") }
                 return
             }
+            self.stage("finish:compute")
             // The controller you actually moved is the one with the most events.
             self.benchLock.lock()
             let stamped = self.queueStamps
             self.benchLock.unlock()
-            let fromQueue = stamped.max(by: { $0.value.count < $1.value.count })
+            let fromQueue = (hadQueues ? stamped : [:]).max(by: { $0.value.count < $1.value.count })
                 .flatMap { ControllerStats.make(name: $0.key, times: $0.value.sorted(), source: "input timestamps") }
             // If iOS gave no usable timestamps, fall back to counting callbacks.
             let grouped = Dictionary(grouping: self.benchEvents, by: { $0.1 })
@@ -515,8 +551,11 @@ final class PadLink: ObservableObject {
             let fromCallbacks = busiest.flatMap { ControllerStats.make(name: $0.key, times: $0.value.map { $0.0 }, source: "app callbacks, less precise") }
             let stats = fromQueue ?? fromCallbacks
             let run = BenchmarkRun(network: BenchmarkResult(rtts: rtts, sent: sent), controller: stats)
+            self.stage("finish:save")
             if let stats { self.save(run, as: stats.name) }
+            self.stage("finish:show")
             self.benchmark = .done(run)
+            if !hadQueues { self.stage("done") }  // with the queue on, the delayed reset marks "done" itself
         }
     }
 

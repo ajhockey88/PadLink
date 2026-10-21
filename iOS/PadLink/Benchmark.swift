@@ -105,7 +105,13 @@ struct BenchmarkView: View {
     var body: some View {
         switch link.benchmark {
         case .idle:
-            EmptyView()
+            if let note = link.crashNote {
+                Card(title: "Benchmark") {
+                    Text(note).font(.footnote).foregroundStyle(Theme.amber)
+                    Button("Dismiss") { link.crashNote = nil }
+                        .font(.footnote)
+                }
+            }
         case .running(let progress):
             Card(title: "Benchmark") {
                 HStack {
