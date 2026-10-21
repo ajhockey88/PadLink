@@ -215,6 +215,9 @@ final class PadLink: ObservableObject {
     private var benchRunning = false
     private var benchCapturing = false                // main thread: recording controller events
     private var benchEvents: [(UInt64, String)] = []   // main thread: (uptime ns, controller name)
+    private let benchInputQueue = DispatchQueue(label: "padlink.bench.input", qos: .userInteractive)
+    private let benchLock = NSLock()
+    private var queueStamps: [String: [UInt64]] = [:]  // guarded by benchLock: event time per input report
     private var benchTicks = 0
     private var benchSent = 0
     private var benchSeqs = Set<UInt16>()
@@ -413,6 +416,35 @@ final class PadLink: ObservableObject {
         persistSaved()
     }
 
+    /// During a benchmark only: ask iOS for every input report with its own timestamp (iOS 16 input state queue),
+    /// which is more precise than counting callbacks. Normal play never uses this, so it cannot affect it.
+    private func enableInputQueues() {
+        benchLock.lock(); queueStamps = [:]; benchLock.unlock()
+        for c in attached {
+            guard let name = controllerName(c) else { continue }
+            let input = c.input
+            input.inputStateQueueDepth = 128
+            input.queue = benchInputQueue
+            input.inputStateAvailableHandler = { [weak self] input in
+                var stamps: [UInt64] = []
+                while let state = input.nextInputState() {
+                    stamps.append(UInt64(max(0, state.lastEventTimestamp) * 1_000_000_000))
+                }
+                guard let self, !stamps.isEmpty else { return }
+                self.benchLock.lock()
+                self.queueStamps[name, default: []].append(contentsOf: stamps)
+                self.benchLock.unlock()
+            }
+        }
+    }
+
+    private func disableInputQueues() {
+        for c in attached {
+            c.input.inputStateAvailableHandler = nil
+            c.input.inputStateQueueDepth = 0
+        }
+    }
+
     /// 10 seconds: 200 signed pings (network) while you move a stick (controller report rate).
     func startBenchmark() {
         guard running, state == .connected, !benchmark.isRunning else {
@@ -423,6 +455,7 @@ final class PadLink: ObservableObject {
         benchCapturing = true
         previousRun = nil
         benchmark = .running(0)
+        enableInputQueues()
         queue.async { [self] in
             benchRTTs = []; benchSeqs = []; benchSent = 0; benchTicks = 0; benchRunning = true
             benchTimer?.cancel()
@@ -436,6 +469,7 @@ final class PadLink: ObservableObject {
 
     func cancelBenchmark() {
         benchCapturing = false
+        disableInputQueues()
         if benchmark.isRunning { benchmark = .idle }
         queue.async { [self] in
             benchRunning = false
@@ -461,15 +495,23 @@ final class PadLink: ObservableObject {
         let sent = benchSent, rtts = benchRTTs
         DispatchQueue.main.async {
             self.benchCapturing = false
+            self.disableInputQueues()
             guard self.benchmark.isRunning else { return }  // cancelled meanwhile
             if sent == 0 || rtts.isEmpty {
                 self.benchmark = .failed(sent == 0 ? "Not connected to a PC." : "The PC did not answer any pings. Check the connection and the pairing code.")
                 return
             }
             // The controller you actually moved is the one with the most events.
+            self.benchLock.lock()
+            let stamped = self.queueStamps
+            self.benchLock.unlock()
+            let fromQueue = stamped.max(by: { $0.value.count < $1.value.count })
+                .flatMap { ControllerStats.make(name: $0.key, times: $0.value.sorted(), source: "input timestamps") }
+            // If iOS gave no usable timestamps, fall back to counting callbacks.
             let grouped = Dictionary(grouping: self.benchEvents, by: { $0.1 })
             let busiest = grouped.max(by: { $0.value.count < $1.value.count })
-            let stats = busiest.flatMap { ControllerStats.make(name: $0.key, times: $0.value.map { $0.0 }) }
+            let fromCallbacks = busiest.flatMap { ControllerStats.make(name: $0.key, times: $0.value.map { $0.0 }, source: "app callbacks, less precise") }
+            let stats = fromQueue ?? fromCallbacks
             let run = BenchmarkRun(network: BenchmarkResult(rtts: rtts, sent: sent), controller: stats)
             if let stats { self.save(run, as: stats.name) }
             self.benchmark = .done(run)

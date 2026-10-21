@@ -116,6 +116,7 @@ If more than one PC answers, tap the one you want; the app remembers. **Find PC 
 - **Test latency** shows a live graph of the network round trip (phone to PC and back) with average, min, max, jitter and lost pings. It only runs when you press it.
 - **Run benchmark** rates a controller. For 10 seconds, move its stick in circles or mash buttons. The app measures how often the controller reports input and the network round trip (200 pings), and reports **input latency** = half the average gap between the controller's reports + half the network round trip. You also get median, 95th percentile, jitter, min, max, lost pings and a rating (Excellent under 10 ms, Good under 20, Fair under 40).
 - Results are saved under the controller's name (up to 10 runs each), compared with its previous run, and listed fastest-first in **Saved controllers**, so you can try several controllers and compare them.
+- The controller's report rate is measured from the timestamps iOS puts on each input report (the iOS 16 input-state queue, switched on only while a benchmark runs), which is more precise than counting app callbacks; if iOS does not provide them, the app falls back to callbacks and says so under the result.
 - It is an estimate of the controller and network only; the PC, the game and your display add more. Two controllers of the same model share one entry, and so do wired and Bluetooth use of one controller, because iOS does not say which connection it is.
 
 ### Tuning

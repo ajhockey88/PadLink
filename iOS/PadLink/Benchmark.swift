@@ -35,13 +35,14 @@ struct ControllerStats: Codable, Equatable {
     var events: Int
     var avgInterval: Double  // ms between consecutive input reports
     var p95Interval: Double
+    var source: String? = nil  // how the gaps were measured
 
     var rateHz: Double { avgInterval > 0 ? 1000 / avgInterval : 0 }
     /// A press lands at a random moment between reports, so it waits half a gap on average.
     var inputDelay: Double { avgInterval / 2 }
 
     /// `times` are uptime nanoseconds of each input event from one controller.
-    static func make(name: String, times: [UInt64]) -> ControllerStats? {
+    static func make(name: String, times: [UInt64], source: String? = nil) -> ControllerStats? {
         var gaps: [Double] = []
         for (a, b) in zip(times, times.dropFirst()) where b > a {
             let ms = Double(b - a) / 1_000_000
@@ -52,7 +53,7 @@ struct ControllerStats: Codable, Equatable {
         let sorted = gaps.sorted()
         let avg = gaps.reduce(0, +) / Double(gaps.count)
         let p95 = sorted[max(0, Int((Double(sorted.count) * 0.95).rounded(.up)) - 1)]
-        return ControllerStats(name: name, events: times.count, avgInterval: avg, p95Interval: p95)
+        return ControllerStats(name: name, events: times.count, avgInterval: avg, p95Interval: p95, source: source)
     }
 }
 
@@ -153,7 +154,7 @@ struct BenchmarkView: View {
                     stat("controller", String(format: "%.1f ms", c.inputDelay))
                     stat("network", String(format: "%.1f ms", run.oneWay))
                 }
-                Text("Controller = half the average gap between its input reports (\(String(format: "%.1f", c.avgInterval)) ms). Network = half the round trip. The PC, the game and your display add more.")
+                Text("Controller = half the average gap between its input reports (\(String(format: "%.1f", c.avgInterval)) ms, from \(c.source ?? "app callbacks")). Network = half the round trip. The PC, the game and your display add more.")
                     .font(.caption2).foregroundStyle(Theme.muted)
                 if let prev = link.previousRun, let before = prev.total {
                     let delta = total - before
