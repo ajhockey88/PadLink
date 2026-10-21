@@ -755,6 +755,7 @@ def swap_and_restart_script(new, target, pids):
     return (waits +
             "$ok = $false; for ($i = 0; $i -lt 40 -and -not $ok; $i++) { try { " + move + "; $ok = $true } "
             "catch { Start-Sleep -Milliseconds 500 } }; "
+            "Start-Sleep -Seconds 2; "  # let the old process release the port and its temp folder
             "if ($ok) { " + start + " }")
 
 
@@ -777,12 +778,23 @@ def install_update(icon):
             new = os.path.join(tempfile.gettempdir(), "PadLinkReceiver.new.exe")
             download_update(update, new)
         _state["note"] = ""
-        pids = [os.getpid(), os.getppid()]  # the exe and its one-file launcher process
+        pids = [os.getpid()]
+        parent = os.getppid()  # the one-file launcher, but only wait for it if it is our own exe (not explorer or cmd)
+        try:
+            out = subprocess.run(["tasklist", "/FI", f"PID eq {parent}", "/FO", "CSV", "/NH"],
+                                 capture_output=True, text=True, timeout=10, creationflags=NO_WINDOW).stdout
+            if os.path.basename(target).lower() in out.lower():
+                pids.append(parent)
+        except Exception:
+            pass
         script = swap_and_restart_script(new, target, pids)
         env = dict(os.environ, PYINSTALLER_RESET_ENVIRONMENT="1")
-        subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass",
-                          "-Command", script], env=env, close_fds=True,
-                         creationflags=NO_WINDOW | 0x00000008 | 0x00000200)  # no window, detached
+        cmd = ["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-Command", script]
+        flags = NO_WINDOW | 0x00000008 | 0x00000200  # no window, detached
+        try:  # leave the job object so the helper is not killed when we exit
+            subprocess.Popen(cmd, env=env, close_fds=True, creationflags=flags | 0x01000000)
+        except OSError:
+            subprocess.Popen(cmd, env=env, close_fds=True, creationflags=flags)
         log(f"Updating to {update['tag']}")
         _state["quit"] = True
         icon.stop()
