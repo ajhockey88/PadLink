@@ -221,6 +221,14 @@ To raise the controller's real rate, look at the controller: some have a polling
 Controller data goes only from your phone to your PC over your own network. The PC program contacts GitHub (`api.github.com`) to check for releases (you can turn that off in the tray) and verifies a SHA-256 checksum before installing an update. The firewall rule only allows devices on your own subnet, and PadLink never touches your router. The pairing code lives in plain text in `settings.json` next to the exe. There are no accounts and no analytics.
 </details>
 
+## Using an Android device instead of a PC (e.g. AYN Thor)
+
+The iPhone app can send to an Android device the same way. Install `PadLink-Android.apk` (from the release) on the Android device and
+[Shizuku](https://shizuku.rikka.app/) (free). Start Shizuku once after each reboot (Wireless debugging; no root needed), open PadLink,
+press **Start** and allow it in Shizuku. The iPhone app finds the device by itself, and games on it see a normal Xbox 360-style controller.
+It uses the same network protocol and pairing code. Not forwarded yet: rumble back to the controller.
+This path is new and has not been tested on a real device by the author; games that ignore virtual controllers will ignore it too.
+
 ## Limits
 - One virtual Xbox 360 pad. Several physical controllers are merged into it, not split into players.
 - Gyro, touchpad and adaptive triggers are not forwarded.
@@ -237,6 +245,7 @@ Controller data goes only from your phone to your PC over your own network. The 
 | Path | What it is |
 |---|---|
 | `iOS/` | The iPhone app (SwiftUI) and `project.yml` for XcodeGen |
+| `Android/` | The Android receiver (Kotlin, Gradle; runs the listener in a Shizuku helper and creates a virtual gamepad through `/dev/uhid`) |
 | `Windows/padlink_receiver.py` | The PC program (also packed into the exe), `requirements.txt`, `install_startup.ps1`, `stamp_version.py` |
 | `tests/` | Automated tests for the PC program (packet format, pairing, updater, first-run setup) |
 | `design/` | App icon artwork (`icon.svg` is the master; colors navy `#0D1321`, off-white `#F2F4F8`, mint `#35E0C2`) |
