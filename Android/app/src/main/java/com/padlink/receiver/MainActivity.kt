@@ -2,14 +2,12 @@ package com.padlink.receiver
 
 import android.Manifest
 import android.app.Activity
-import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
-import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -131,7 +129,7 @@ class MainActivity : Activity() {
                 }
                 "listening" -> {
                     status.text = "Waiting for the iPhone"
-                    detail.text = "Open PadLink on the iPhone. It finds this device automatically." + (if (ip.isNotEmpty()) " If not, enter $ip in the app." else "")
+                    detail.text = "Open PadLink on the iPhone. It finds this device automatically." + (if (ip.isNotEmpty()) " If not, enter $ip in the iPhone app." else "")
                 }
                 else -> {
                     status.text = "Starting…"
@@ -190,10 +188,16 @@ class MainActivity : Activity() {
         startActivity(launch ?: Intent(Intent.ACTION_VIEW, Uri.parse("https://shizuku.rikka.app/download/")))
     }
 
-    @Suppress("DEPRECATION")
+    /** Every private IPv4 address on this device (Wi-Fi, Ethernet adapter...), e.g. "192.168.1.20 (eth0)". */
     private fun localIp(): String = try {
-        val ip = (applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager).connectionInfo.ipAddress
-        if (ip == 0) "" else "${ip and 0xFF}.${ip shr 8 and 0xFF}.${ip shr 16 and 0xFF}.${ip shr 24 and 0xFF}"
+        java.net.NetworkInterface.getNetworkInterfaces().toList()
+            .filter { it.isUp && !it.isLoopback }
+            .flatMap { nif ->
+                nif.inetAddresses.toList()
+                    .filter { it is java.net.Inet4Address && it.isSiteLocalAddress }
+                    .map { "${it.hostAddress} (${nif.name})" }
+            }
+            .joinToString(" or ")
     } catch (_: Exception) {
         ""
     }
