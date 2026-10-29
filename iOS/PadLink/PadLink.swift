@@ -272,10 +272,19 @@ final class PadLink: ObservableObject {
     private func attach(_ c: GCController) {
         guard let gp = c.extendedGamepad else { return }
         if !attached.contains(where: { $0 === c }) { attached.append(c) }
+        // iOS runs controller handlers on the main queue unless told otherwise, which puts the SwiftUI
+        // run loop in front of every packet. Run them on the network queue and send from there; the
+        // main-thread bookkeeping follows, carrying the time the report arrived.
+        c.handlerQueue = queue
         gp.valueChangedHandler = { [weak self] g, _ in
-            self?.lastActive = g.controller
-            self?.noteEvent(g.controller)
-            self?.send()
+            guard let self else { return }
+            let stamp = DispatchTime.now().uptimeNanoseconds
+            self.sendNow()
+            let source = g.controller
+            DispatchQueue.main.async {
+                self.lastActive = source
+                self.noteEvent(source, at: stamp)
+            }
         }
         syncPads()
     }
@@ -419,9 +428,10 @@ final class PadLink: ObservableObject {
         return c.productCategory.isEmpty ? base : "\(base) (\(c.productCategory))"
     }
 
-    private func noteEvent(_ c: GCController?) {
+    /// Main thread. `stamp` is when the report reached the handler, not when this ran.
+    private func noteEvent(_ c: GCController?, at stamp: UInt64) {
         guard benchCapturing, let name = controllerName(c) else { return }
-        benchEvents.append((DispatchTime.now().uptimeNanoseconds, name))
+        benchEvents.append((stamp, name))
     }
 
     private func save(_ run: BenchmarkRun, as name: String) {
@@ -709,10 +719,7 @@ final class PadLink: ObservableObject {
         }
     }
 
-    private func send() {
-        queue.async { self.sendNow() }
-    }
-
+    /// Must run on `queue`: the controller handlers and the resend timer both do.
     private func sendNow() {
         guard let conn = connection, !pads.isEmpty else { return }
         let data = signed(Self.encode(pads, seq: seq, tuning: tuning))

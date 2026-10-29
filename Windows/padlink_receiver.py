@@ -27,6 +27,10 @@ RELEASES_URL = f"https://github.com/{REPO}/releases/latest"
 CHECK_EVERY = 12 * 3600  # seconds between automatic update checks
 
 PORT = 26760
+# Python lets a waiting thread take the interpreter lock only every 5 ms by default. The receive loop
+# sleeps in recvfrom, so a packet can sit that long behind a busy tray, mDNS or update thread. A shorter
+# interval bounds the wait; a few more thread switches a second cost nothing here.
+SWITCH_INTERVAL = 0.0005
 MAGIC = 0x504C
 PING_MAGIC = 0x5049
 RUMBLE_MAGIC = 0x5052
@@ -1016,8 +1020,15 @@ def run_tray():
     icon.run(lambda i: threading.Thread(target=refresh, args=(i,), daemon=True).start())
 
 
+def tune_interpreter():
+    """Cap how long a packet can wait for the interpreter lock (see SWITCH_INTERVAL)."""
+    if sys.getswitchinterval() > SWITCH_INTERVAL:
+        sys.setswitchinterval(SWITCH_INTERVAL)
+
+
 def main():
     print("PadLink receiver starting...")
+    tune_interpreter()
     ensure_requirements()
     sock = open_socket()
     _state["sock"] = sock

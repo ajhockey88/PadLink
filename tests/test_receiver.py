@@ -81,6 +81,18 @@ class PureLogic(unittest.TestCase):
         self.assertEqual(self.r.key_for("abcd-efgh-jkmn"), self.r.key_for("ABCDEFGHJKMN"))
         self.assertNotEqual(self.r.key_for("ABCDEFGHJKMN"), self.r.key_for("ABCDEFGHJKMP"))
 
+    def test_interpreter_switch_interval_is_short(self):
+        saved = sys.getswitchinterval()
+        try:
+            sys.setswitchinterval(0.005)  # Python's default
+            self.r.tune_interpreter()
+            self.assertAlmostEqual(sys.getswitchinterval(), self.r.SWITCH_INTERVAL, places=6)
+            sys.setswitchinterval(0.0001)  # an already shorter interval is left alone
+            self.r.tune_interpreter()
+            self.assertAlmostEqual(sys.getswitchinterval(), 0.0001, places=6)
+        finally:
+            sys.setswitchinterval(saved)
+
     def test_parse_and_sign(self):
         r = self.r
         key = r.key_for("ABCDEFGHJKMN")
